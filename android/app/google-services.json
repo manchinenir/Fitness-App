@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "710819384507",
+    "project_id": "flex-facility-app-b55aa",
+    "storage_bucket": "flex-facility-app-b55aa.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:710819384507:android:041b4d63d41fde47d7ad9e",
+        "android_client_info": {
+          "package_name": "com.flexfacility.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCQ-747zx0zDzgkuW3DPCO8sWo_Ft_J2_o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
