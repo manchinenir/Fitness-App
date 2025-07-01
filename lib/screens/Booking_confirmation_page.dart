@@ -1,15 +1,15 @@
+//Booking_Conformation_page.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
-import 'package:cloud_functions/cloud_functions.dart';
-
+ 
 class BookingConfirmationPage extends StatefulWidget {
   final DateTime selectedDate;
   final String selectedTime;
   final String trainerName;
   final int slotCapacity;
-
+ 
   const BookingConfirmationPage({
     super.key,
     required this.selectedDate,
@@ -17,313 +17,161 @@ class BookingConfirmationPage extends StatefulWidget {
     required this.trainerName,
     required this.slotCapacity,
   });
-
+ 
   @override
   State<BookingConfirmationPage> createState() => _BookingConfirmationPageState();
 }
-
-class _BookingConfirmationPageState extends State<BookingConfirmationPage> with SingleTickerProviderStateMixin {
+ 
+class _BookingConfirmationPageState extends State<BookingConfirmationPage> {
   bool _loading = false;
-  bool _alreadyBooked = false;
   bool _showSuccess = false;
-  late AnimationController _controller;
-  late Animation<double> _fadeAnimation;
-  late Animation<Offset> _slideAnimation;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      duration: const Duration(milliseconds: 1000),
-      vsync: this,
+ 
+  Future<void> _bookSlot() async {
+  setState(() => _loading = true);
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return;
+ 
+  try {
+    // Normalize selected date to midnight to avoid timezone issues
+    DateTime normalizedDate = DateTime(
+      widget.selectedDate.year,
+      widget.selectedDate.month,
+      widget.selectedDate.day,
     );
-    _fadeAnimation = CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeIn,
-    );
-    _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 0.5),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeOut,
-    ));
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  Future<void> triggerNotification(String action, String name, String email, String phone) async {
-    final callable = FirebaseFunctions.instance.httpsCallable('notifyTrainerClient');
-    await callable.call({
-      'action': action,
-      'date': DateFormat('yyyy-MM-dd').format(widget.selectedDate),
-      'time': widget.selectedTime,
-      'userName': name,
-      'email': email,
-      'phone': phone,
-      'trainerName': widget.trainerName,
-    });
-  }
-
-  Future<void> bookSlot() async {
-    setState(() => _loading = true);
-
-    final currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null) return;
-
-    final userDoc = await FirebaseFirestore.instance.collection('users').doc(currentUser.uid).get();
-    final userName = userDoc['name'] ?? 'Client';
-    final userEmail = userDoc['email'] ?? '';
-    final userPhone = userDoc['phone'] ?? '';
-
-    final docId = "${DateFormat('yyyy-MM-dd').format(widget.selectedDate)}|${widget.selectedTime}";
+ 
+    final formattedDate = DateFormat('yyyy-MM-dd').format(normalizedDate);
+    final docId = '$formattedDate|${widget.selectedTime}';
     final docRef = FirebaseFirestore.instance.collection('trainer_slots').doc(docId);
-    final doc = await docRef.get();
-
-    if (!doc.exists) {
-      await docRef.set({
-        'date': widget.selectedDate,
-        'time': widget.selectedTime,
-        'booked': 1,
-        'booked_by': [currentUser.uid],
-        'booked_names': [userName],
-        'capacity': widget.slotCapacity,
-        'trainer_name': widget.trainerName,
-      });
-    } else {
-      final data = doc.data()!;
-      List bookedBy = data['booked_by'] ?? [];
-      List bookedNames = data['booked_names'] ?? [];
-
-      if (bookedBy.contains(currentUser.uid)) {
-        setState(() {
-          _alreadyBooked = true;
-          _loading = false;
+ 
+    final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+ 
+    await FirebaseFirestore.instance.runTransaction((transaction) async {
+      final doc = await transaction.get(docRef);
+      if (!doc.exists) {
+        transaction.set(docRef, {
+          'date': Timestamp.fromDate(normalizedDate), // 👈 correct date saved
+          'time': widget.selectedTime,
+          'booked': 1,
+          'booked_by': [user.uid],
+          'booked_names': [userDoc['name'] ?? 'Client'],
+          'booked_emails': [userDoc['email'] ?? ''],
+          'capacity': widget.slotCapacity,
+          'trainer_name': widget.trainerName,
+          'created_at': Timestamp.now(),
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('You already booked this slot.')),
-        );
-        return;
-      } else if (bookedBy.length >= widget.slotCapacity) {
-        setState(() => _loading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Slot is full.')),
-        );
-        return;
+      } else {
+        final data = doc.data()!;
+        if ((data['booked_by'] as List).contains(user.uid)) {
+          throw Exception('You already booked this slot');
+        }
+        if ((data['booked_by'] as List).length >= widget.slotCapacity) {
+          throw Exception('Slot is full');
+        }
+        transaction.update(docRef, {
+          'booked': FieldValue.increment(1),
+          'booked_by': FieldValue.arrayUnion([user.uid]),
+          'booked_names': FieldValue.arrayUnion([userDoc['name'] ?? 'Client']),
+          'booked_emails': FieldValue.arrayUnion([userDoc['email'] ?? '']),
+        });
       }
-
-      bookedBy.add(currentUser.uid);
-      bookedNames.add(userName);
-      await docRef.update({
-        'booked': bookedBy.length,
-        'booked_by': bookedBy,
-        'booked_names': bookedNames,
-      });
-    }
-
-    try {
-      await triggerNotification('book', userName, userEmail, userPhone);
-    } catch (e) {
-      debugPrint('Notification Error: $e');
-    }
-
+    });
+ 
     setState(() {
       _loading = false;
       _showSuccess = true;
     });
-    await _controller.forward();
+  } catch (e) {
+    setState(() => _loading = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(e.toString())),
+    );
   }
-
-  Future<void> cancelBooking() async {
-    final currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null) return;
-
-    final docId = "${DateFormat('yyyy-MM-dd').format(widget.selectedDate)}|${widget.selectedTime}";
-    final docRef = FirebaseFirestore.instance.collection('trainer_slots').doc(docId);
-    final doc = await docRef.get();
-
-    if (!doc.exists) return;
-
-    final userDoc = await FirebaseFirestore.instance.collection('users').doc(currentUser.uid).get();
-    final userName = userDoc['name'] ?? 'Client';
-    final userEmail = userDoc['email'] ?? '';
-    final userPhone = userDoc['phone'] ?? '';
-
-    final data = doc.data()!;
-    List bookedBy = data['booked_by'] ?? [];
-    List bookedNames = data['booked_names'] ?? [];
-
-    if (bookedBy.contains(currentUser.uid)) {
-      int index = bookedBy.indexOf(currentUser.uid);
-      bookedBy.removeAt(index);
-      bookedNames.removeAt(index);
-
-      await docRef.update({
-        'booked': bookedBy.length,
-        'booked_by': bookedBy,
-        'booked_names': bookedNames,
-      });
-
-      await triggerNotification('cancel', userName, userEmail, userPhone);
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Booking cancelled.')),
-      );
-
-      Navigator.pop(context);
-    }
+}
+ 
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Booking Confirmation'),
+        backgroundColor: const Color(0xFF1C2D5E),
+        foregroundColor: Colors.white,
+      ),
+      body: _showSuccess
+          ? _buildSuccessUI()
+          : _buildConfirmationUI(),
+    );
   }
-
-  Widget _buildConfirmationContent() {
-    final formattedDate = DateFormat('yyyy-MM-dd').format(widget.selectedDate);
-
+ 
+  Widget _buildConfirmationUI() {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24.0),
+        padding: const EdgeInsets.all(20),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black12,
-                    blurRadius: 10,
-                    spreadRadius: 3,
-                  ),
-                ],
-              ),
-              child: Column(
-                children: [
-                  Text("Trainer: ${widget.trainerName}", 
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w500)),
-                  const SizedBox(height: 8),
-                  Text("Date: $formattedDate", style: const TextStyle(fontSize: 18)),
-                  const SizedBox(height: 8),
-                  Text("Time: ${widget.selectedTime}", style: const TextStyle(fontSize: 18)),
-                ],
-              ),
+            Text('Trainer: ${widget.trainerName}',
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            Text(
+              'Date: ${DateFormat('EEEE, MMMM d').format(widget.selectedDate)}',
+              style: const TextStyle(fontSize: 18),
             ),
-            const SizedBox(height: 30),
-            if (_loading)
-              const CircularProgressIndicator()
-            else ...[
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-                onPressed: bookSlot,
-                child: const Text("Confirm Booking", style: TextStyle(fontSize: 16)),
-              ),
-              
-            ]
+            const SizedBox(height: 8),
+            Text('Time: ${widget.selectedTime}', style: const TextStyle(fontSize: 18)),
+            const SizedBox(height: 32),
+            _loading
+                ? const CircularProgressIndicator()
+                : ElevatedButton(
+                    onPressed: _bookSlot,
+                    style: ElevatedButton.styleFrom(
+                      minimumSize: const Size(200, 50),
+                      backgroundColor: const Color(0xFF1C2D5E),
+                    ),
+                    child: const Text('Confirm Booking',
+                        style: TextStyle(fontSize: 18, color: Colors.white)),
+                  ),
           ],
         ),
       ),
     );
   }
-
-  Widget _buildSuccessContent() {
-    return Container(
-      color: Colors.green.shade50,
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SlideTransition(
-                position: _slideAnimation,
-                child: FadeTransition(
-                  opacity: _fadeAnimation,
-                  child: const Icon(
-                    Icons.check_circle,
-                    color: Colors.green,
-                    size: 100,
-                  ),
-                ),
+ 
+  Widget _buildSuccessUI() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.check_circle, color: Colors.green, size: 80),
+            const SizedBox(height: 20),
+            const Text('Booking Confirmed!',
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            Text('Trainer: ${widget.trainerName}', style: const TextStyle(fontSize: 18)),
+            const SizedBox(height: 8),
+            Text(
+              'Date: ${DateFormat('EEEE, MMMM d').format(widget.selectedDate)}',
+              style: const TextStyle(fontSize: 18),
+            ),
+            const SizedBox(height: 8),
+            Text('Time: ${widget.selectedTime}', style: const TextStyle(fontSize: 18)),
+            const SizedBox(height: 24),
+            const Text('Confirmation email has been sent',
+                style: TextStyle(fontSize: 16)),
+            const SizedBox(height: 32),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                minimumSize: const Size(200, 50),
               ),
-              const SizedBox(height: 20),
-              AnimatedBuilder(
-                animation: _controller,
-                builder: (context, child) {
-                  return Transform.scale(
-                    scale: _controller.value * 0.2 + 0.8,
-                    child: Opacity(
-                      opacity: _controller.value,
-                      child: const Text(
-                        "Booking Confirmed!",
-                        style: TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.green,
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-              const SizedBox(height: 30),
-              Text(
-                "Trainer: ${widget.trainerName}",
-                style: const TextStyle(fontSize: 18),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                "Date: ${DateFormat('yyyy-MM-dd').format(widget.selectedDate)}",
-                style: const TextStyle(fontSize: 18),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                "Time: ${widget.selectedTime}",
-                style: const TextStyle(fontSize: 18),
-              ),
-              const SizedBox(height: 40),
-              Text(
-                "A confirmation has been sent to your email",
-                style: TextStyle(
-                  fontSize: 16,
-                  color: Colors.grey.shade700,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 30),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-                onPressed: () {
-                  Navigator.pop(context);
-                },
-                child: const Text(
-                  "Done",
-                  style: TextStyle(fontSize: 16, color: Colors.white),
-                ),
-              ),
-            ],
-          ),
+              child: const Text('Done',
+                  style: TextStyle(fontSize: 18, color: Colors.white)),
+            ),
+          ],
         ),
       ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: _showSuccess ? null : AppBar(title: const Text("Confirm Booking")),
-      body: _showSuccess ? _buildSuccessContent() : _buildConfirmationContent(),
     );
   }
 }

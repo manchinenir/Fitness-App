@@ -1,271 +1,229 @@
-// schedule_screen.dart
+//schudhle_screen.dart
 import 'package:flutter/material.dart';
-
-class ScheduleScreen extends StatefulWidget {
-  const ScheduleScreen({super.key});
-
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:intl/intl.dart';
+ 
+class MySchedulePage extends StatefulWidget {
+  const MySchedulePage({super.key});
+ 
   @override
-  State<ScheduleScreen> createState() => _ScheduleScreenState();
+  State<MySchedulePage> createState() => _MySchedulePageState();
 }
-
-class _ScheduleScreenState extends State<ScheduleScreen> {
-  int? selectedDate;
-  DateTime selectedDateTime = DateTime.now();
-  String? selectedTime;
-
-  final List<int> availableDates = List.generate(26, (index) => index + 1);
-
-  List<String> getAvailableTimes(int day) {
-    final date = DateTime(2024, 4, day);
-    final weekday = date.weekday;
-
-    if (weekday >= 6 || weekday == 1) {
-      return _generateTimeSlots('5:30 AM', '11:00 AM', 30);
-    } else {
-      return [
-        ..._generateTimeSlots('5:30 AM', '9:00 AM', 30),
-        ..._generateTimeSlots('4:30 PM', '7:00 PM', 30),
-      ];
+ 
+class _MySchedulePageState extends State<MySchedulePage> {
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  bool _isLoading = true;
+  List<Map<String, dynamic>> _bookedSlots = [];
+ 
+  @override
+  void initState() {
+    super.initState();
+    _fetchBookedSlots();
+  }
+ 
+  Future<void> _fetchBookedSlots() async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+ 
+    try {
+      final querySnapshot = await _firestore
+          .collection('trainer_slots')
+          .where('booked_by', arrayContains: user.uid)
+          .get();
+ 
+      setState(() {
+        _bookedSlots = querySnapshot.docs.map((doc) {
+          final data = doc.data();
+          DateTime date;
+          if (data['date'] is Timestamp) {
+            final utcDate = (data['date'] as Timestamp).toDate();
+            date = DateTime(utcDate.year, utcDate.month, utcDate.day);
+          } else if (data['date'] is DateTime) {
+            date = data['date'] as DateTime;
+          } else if (data['date'] is String) {
+            date = DateTime.parse(data['date'] as String);
+          } else {
+            date = DateTime.now();
+          }
+ 
+          return {
+            'id': doc.id,
+            'date': date,
+            'time': data['time'] ?? '',
+            'trainer': data['trainer_name'] ?? 'Unknown Trainer',
+            'docRef': doc.reference,
+          };
+        }).toList();
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error fetching slots: ${e.toString()}')),
+      );
     }
   }
-
-  List<String> _generateTimeSlots(String start, String end, int interval) {
-    TimeOfDay parseTime(String time) {
-      final parts = time.split(RegExp(r'[: ]'));
-      int hour = int.parse(parts[0]);
-      int minute = int.parse(parts[1]);
-      final period = parts[2];
-      if (period == 'PM' && hour != 12) hour += 12;
-      if (period == 'AM' && hour == 12) hour = 0;
-      return TimeOfDay(hour: hour, minute: minute);
+ 
+  Future<void> _cancelBooking(DocumentReference docRef) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+ 
+    try {
+      await _firestore.runTransaction((transaction) async {
+        final doc = await transaction.get(docRef);
+        if (!doc.exists) throw Exception('Slot not found');
+ 
+        List bookedBy = List.from(doc['booked_by'] ?? []);
+        List bookedNames = List.from(doc['booked_names'] ?? []);
+ 
+        if (!bookedBy.contains(user.uid)) {
+          throw Exception('No booking found to cancel');
+        }
+ 
+        int index = bookedBy.indexOf(user.uid);
+        bookedBy.removeAt(index);
+        bookedNames.removeAt(index);
+ 
+        transaction.update(docRef, {
+          'booked': FieldValue.increment(-1),
+          'booked_by': bookedBy,
+          'booked_names': bookedNames,
+        });
+      });
+ 
+      await _fetchBookedSlots();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Booking cancelled successfully')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to cancel: ${e.toString()}')),
+      );
     }
-
-    final startTime = parseTime(start);
-    final endTime = parseTime(end);
-
-    List<String> slots = [];
-    TimeOfDay current = startTime;
-
-    while (current.hour < endTime.hour ||
-        (current.hour == endTime.hour && current.minute < endTime.minute)) {
-      slots.add(_formatTimeOfDay(current));
-      int minutes = current.hour * 60 + current.minute + interval;
-      current = TimeOfDay(hour: minutes ~/ 60, minute: minutes % 60);
-    }
-
-    return slots;
   }
-
-  String _formatTimeOfDay(TimeOfDay time) {
-    final hour = time.hourOfPeriod == 0 ? 12 : time.hourOfPeriod;
-    final minute = time.minute.toString().padLeft(2, '0');
-    final period = time.period == DayPeriod.am ? 'AM' : 'PM';
-    return '$hour:$minute $period';
-  }
-
+ 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Trainer Schedule'),
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'SCHEDULE'),
-              Tab(text: 'BOOK'),
-            ],
-          ),
-        ),
-        body: TabBarView(
-          children: [
-            _buildScheduleSessionTab(),
-            _buildBookSessionTab(),
-          ],
-        ),
+    return Scaffold(
+      backgroundColor: const Color(0xFFF6F8FA),
+      appBar: AppBar(
+        title: const Text('My Scheduled Sessions'),
+        backgroundColor: const Color(0xFF1C2D5E),
+        foregroundColor: Colors.white,
+        elevation: 0,
       ),
-    );
-  }
-
-  Widget _buildScheduleSessionTab() {
-    return _buildCalendarTab((day) => _buildDynamicTimeSlots(day));
-  }
-
-  Widget _buildBookSessionTab() {
-    return _buildCalendarTab((day) => _buildDynamicBookSlots(day));
-  }
-
-  Widget _buildCalendarTab(List<Widget> Function(int) timeSlotBuilder) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'April 2024',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 16),
-          _buildCalendar(),
-          const SizedBox(height: 24),
-          if (selectedDate != null) ...[
-            const Text(
-              'Select Time',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            ...timeSlotBuilder(selectedDate!),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCalendar() {
-    List<TableRow> rows = [
-      const TableRow(
-        children: [
-          _CalendarCell('Sun', isHeader: true),
-          _CalendarCell('Mon', isHeader: true),
-          _CalendarCell('Tue', isHeader: true),
-          _CalendarCell('Wed', isHeader: true),
-          _CalendarCell('Thu', isHeader: true),
-          _CalendarCell('Fri', isHeader: true),
-          _CalendarCell('Sat', isHeader: true),
-        ],
-      )
-    ];
-
-    List<int> allDays = List.generate(26, (i) => i + 1);
-    List<List<int>> weeks = [];
-
-    while (allDays.isNotEmpty) {
-      weeks.add(allDays.take(7).toList());
-      allDays = allDays.skip(7).toList();
-    }
-
-    for (var week in weeks) {
-      List<Widget> cells = week.map((day) {
-        return _CalendarCell(
-          '$day',
-          isSelected: selectedDate == day,
-          onTap: () => _selectDate(day),
-        );
-      }).toList();
-      while (cells.length < 7) {
-        cells.add(const _CalendarCell(''));
-      }
-      rows.add(TableRow(children: cells));
-    }
-
-    return Table(children: rows);
-  }
-
-  void _selectDate(int day) {
-    setState(() {
-      selectedDate = day;
-      selectedDateTime = DateTime(2024, 4, day);
-      selectedTime = null;
-    });
-  }
-
-  List<Widget> _buildDynamicTimeSlots(int day) {
-    final times = getAvailableTimes(day);
-    return times.map((time) => _buildTimeSlot(time)).toList();
-  }
-
-  List<Widget> _buildDynamicBookSlots(int day) {
-    final times = getAvailableTimes(day);
-    return times.map((time) => _buildTimeSlot(time, showSlots: true)).toList();
-  }
-
-  Widget _buildTimeSlot(String time, {bool showSlots = false}) {
-    final slotsLeft = showSlots ? _getRandomSlotsAvailable(time) : null;
-    final isSelected = selectedTime == time;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: InkWell(
-        onTap: () => setState(() => selectedTime = time),
-        child: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: isSelected ? Colors.indigo : Colors.grey[200],
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                time,
-                style: TextStyle(
-                  color: isSelected ? Colors.white : Colors.black,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              if (slotsLeft != null)
-                Text(
-                  slotsLeft,
-                  style: TextStyle(
-                    color: isSelected ? Colors.white : Colors.black,
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _bookedSlots.isEmpty
+              ? const Center(
+                  child: Text(
+                    'No booked sessions found',
+                    style: TextStyle(fontSize: 18, color: Colors.grey),
+                  ),
+                )
+              : RefreshIndicator(
+                  onRefresh: _fetchBookedSlots,
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _bookedSlots.length,
+                    itemBuilder: (context, index) {
+                      final slot = _bookedSlots[index];
+                      final dateStr = DateFormat('EEEE, MMMM d').format(slot['date']);
+                      final time = slot['time'];
+ 
+                      return Card(
+                        elevation: 4,
+                        margin: const EdgeInsets.only(bottom: 16),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(16),
+                            gradient: const LinearGradient(
+                              colors: [Color(0xFF1C2D5E), Color(0xFF3D5A80)],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(20),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        slot['trainer'],
+                                        style: const TextStyle(
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(Icons.cancel, color: Colors.redAccent),
+                                      onPressed: () => _showCancelDialog(slot['docRef']),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                Row(
+                                  children: [
+                                    const Icon(Icons.calendar_today, color: Colors.white70, size: 18),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      dateStr,
+                                      style: const TextStyle(color: Colors.white70, fontSize: 16),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    const Icon(Icons.access_time, color: Colors.white70, size: 18),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      time,
+                                      style: const TextStyle(color: Colors.white70, fontSize: 16),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ),
-            ],
-          ),
-        ),
-      ),
     );
   }
-
-  String _getRandomSlotsAvailable(String time) {
-    final random = DateTime.now().millisecond % 5;
-    if (random == 0) return '1 slot left';
-    return '$random slots left';
-  }
-}
-
-class _CalendarCell extends StatelessWidget {
-  final String text;
-  final bool isHeader;
-  final bool isSelected;
-  final VoidCallback? onTap;
-
-  const _CalendarCell(
-    this.text, {
-    this.isHeader = false,
-    this.isSelected = false,
-    this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.all(8.0),
-        child: Container(
-          height: 40,
-          decoration: isSelected
-              ? const BoxDecoration(
-                  color: Colors.indigo,
-                  shape: BoxShape.circle,
-                )
-              : null,
-          child: Center(
-            child: Text(
-              text,
-              style: TextStyle(
-                fontWeight: isHeader ? FontWeight.bold : FontWeight.normal,
-                color: isHeader
-                    ? Colors.black
-                    : isSelected
-                        ? Colors.white
-                        : Colors.black,
-              ),
-            ),
+ 
+  void _showCancelDialog(DocumentReference docRef) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cancel Booking'),
+        content: const Text('Are you sure you want to cancel this session?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('No'),
           ),
-        ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _cancelBooking(docRef);
+            },
+            child: const Text('Yes', style: TextStyle(color: Colors.red)),
+          ),
+        ],
       ),
     );
   }
 }
+ 
