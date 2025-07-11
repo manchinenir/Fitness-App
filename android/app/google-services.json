@@ -12,7 +12,12 @@
           "package_name": "com.flexfacility.app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "710819384507-e7t1lose3a27bi4kvkvcdioiret2r9r3.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyCQ-747zx0zDzgkuW3DPCO8sWo_Ft_J2_o"
@@ -20,7 +25,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "710819384507-e7t1lose3a27bi4kvkvcdioiret2r9r3.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

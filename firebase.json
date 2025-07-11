@@ -1,7 +1,10 @@
 {
+  "hosting": {},
   "functions": [
     {
       "source": "functions",
+      "runtime": "nodejs18",
+      "gen": 1,
       "codebase": "default",
       "ignore": [
         "node_modules",
@@ -10,6 +13,7 @@
         "firebase-debug.*.log",
         "*.local"
       ]
+     
       
     }
   ]

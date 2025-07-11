@@ -25,31 +25,32 @@ class BookingConfirmationPage extends StatefulWidget {
 class _BookingConfirmationPageState extends State<BookingConfirmationPage> {
   bool _loading = false;
   bool _showSuccess = false;
- 
-  Future<void> _bookSlot() async {
+ Future<void> _bookSlot() async {
   setState(() => _loading = true);
   final user = FirebaseAuth.instance.currentUser;
   if (user == null) return;
- 
+
   try {
-    // Normalize selected date to midnight to avoid timezone issues
+    // Normalize date to midnight to avoid timezone/timezone offset issues
     DateTime normalizedDate = DateTime(
       widget.selectedDate.year,
       widget.selectedDate.month,
       widget.selectedDate.day,
     );
- 
+
     final formattedDate = DateFormat('yyyy-MM-dd').format(normalizedDate);
     final docId = '$formattedDate|${widget.selectedTime}';
     final docRef = FirebaseFirestore.instance.collection('trainer_slots').doc(docId);
- 
+
     final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
- 
+
     await FirebaseFirestore.instance.runTransaction((transaction) async {
       final doc = await transaction.get(docRef);
+
       if (!doc.exists) {
+        // Slot does not exist: create it with the first booking
         transaction.set(docRef, {
-          'date': Timestamp.fromDate(normalizedDate), // 👈 correct date saved
+          'date': Timestamp.fromDate(normalizedDate),
           'time': widget.selectedTime,
           'booked': 1,
           'booked_by': [user.uid],
@@ -61,12 +62,18 @@ class _BookingConfirmationPageState extends State<BookingConfirmationPage> {
         });
       } else {
         final data = doc.data()!;
-        if ((data['booked_by'] as List).contains(user.uid)) {
-          throw Exception('You already booked this slot');
+        final currentBooked = data['booked'] ?? 0;
+        final bookedBy = List.from(data['booked_by'] ?? []);
+        final capacity = data['capacity'] ?? widget.slotCapacity;
+
+        if (bookedBy.contains(user.uid)) {
+          throw Exception('You already booked this slot.');
         }
-        if ((data['booked_by'] as List).length >= widget.slotCapacity) {
-          throw Exception('Slot is full');
+        if (currentBooked >= capacity) {
+          throw Exception('Slot is full.');
         }
+
+        // Update existing slot: increment booked count, add client info
         transaction.update(docRef, {
           'booked': FieldValue.increment(1),
           'booked_by': FieldValue.arrayUnion([user.uid]),
@@ -75,7 +82,7 @@ class _BookingConfirmationPageState extends State<BookingConfirmationPage> {
         });
       }
     });
- 
+
     setState(() {
       _loading = false;
       _showSuccess = true;
@@ -87,7 +94,7 @@ class _BookingConfirmationPageState extends State<BookingConfirmationPage> {
     );
   }
 }
- 
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(

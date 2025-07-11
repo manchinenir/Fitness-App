@@ -9,6 +9,8 @@ import 'client_book_slot.dart';
 import 'client_plans_screen.dart';
 import 'schedule_screen.dart';
 import 'booking_confirmation_page.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+
 
 class DashboardItem {
   final IconData icon;
@@ -41,10 +43,29 @@ class _ClientDashboardState extends State<ClientDashboard> {
   String? errorMessage;
 
   @override
-  void initState() {
-    super.initState();
-    _fetchUserName();
-  }
+void initState() {
+  super.initState();
+  _fetchUserName();
+
+  // ✅ Correct placement: inside initState
+  FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+    print('📩 Foreground notification received: ${message.notification?.title}');
+
+    if (message.notification != null && mounted) {
+      final snackBar = SnackBar(
+        content: Text(
+          '${message.notification!.title ?? "No Title"}: ${message.notification!.body ?? "No Body"}',
+          style: const TextStyle(color: Colors.white),
+        ),
+        backgroundColor: Colors.blueAccent,
+        duration: const Duration(seconds: 4),
+      );
+
+      ScaffoldMessenger.of(context).showSnackBar(snackBar);
+    }
+  });
+}
+
 
   Future<void> _fetchUserName() async {
     try {
