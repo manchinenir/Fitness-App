@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'admin_create_slots.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-
+import 'post_announcement.dart';
 import 'client_list_screen.dart';
 
 
@@ -66,7 +66,7 @@ appBar: AppBar(
                     Navigator.pushNamed(context, '/adminWorkoutMulti', arguments: []);
                   },
                 ),
-                _buildNavTile(context, Icons.announcement, 'Announcements', null),
+                _buildNavTile(context, Icons.announcement, 'Announcements', const PostAnnouncementScreen()),
                 _buildNavTile(context, Icons.settings, 'Settings', null),
                 _buildNavTile(context, Icons.upload, 'Upload Slots', null, action: () async {
                   await uploadTrainerSlots(context);
