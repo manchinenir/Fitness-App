@@ -117,6 +117,7 @@ final Map<String, dynamic> dataToSave = {
   'capacity': widget.slotCapacity,
   'last_updated': FieldValue.serverTimestamp(),
   'is_reschedule': widget.rescheduleSlot != null, // This is the key line
+  'status': widget.rescheduleSlot != null ? 'Rescheduled' : 'Confirmed',
 };
 
         if (widget.rescheduleSlot != null) {

@@ -18,6 +18,7 @@ dependencies:
   pdf: ^3.10.4
   printing: ^5.12.0
   url_launcher: ^6.2.5
+  share_plus: ^7.2.1
  
   csv: ^5.0.1
 
@@ -53,7 +54,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/images/flex_logo.png
+    - assets/images/flex_login/logo.png
     
 flutter_native_splash:
   color: "#1C2D5E"

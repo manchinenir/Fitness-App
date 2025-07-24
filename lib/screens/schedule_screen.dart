@@ -174,23 +174,30 @@ class _MySchedulePageState extends State<MySchedulePage> with SingleTickerProvid
                     style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1C2D5E)),
                   ),
                 ),
-                if (!isPast) ...[
-                  TextButton(
-                    onPressed: () => _rescheduleBooking(slot),
-                    child: const Text('Reschedule', style: TextStyle(color: Colors.orange)),
-                  ),
-                  TextButton(
-                    onPressed: () => _showCancelDialog(slot['docRef']),
-                    child: const Text('Cancel', style: TextStyle(color: Colors.red)),
-                  ),
-                ]
+               if (!isPast) ...[
+  if (status != 'Rescheduled')
+    TextButton(
+      onPressed: () => _rescheduleBooking(slot),
+      child: const Text('Reschedule', style: TextStyle(color: Colors.orange)),
+    ),
+  TextButton(
+    onPressed: () => _showCancelDialog(slot['docRef']),
+    child: const Text('Cancel', style: TextStyle(color: Colors.red)),
+  ),
+]
+
               ],
             ),
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: status == 'Cancelled' ? Colors.red : Colors.green,
+                color: status == 'Cancelled'
+    ? Colors.red
+    : status == 'Rescheduled'
+        ? Colors.orange
+        : Colors.green,
+
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(

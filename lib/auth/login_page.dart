@@ -3,21 +3,21 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
- 
+
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
- 
+
   @override
   State<LoginPage> createState() => _LoginPageState();
 }
- 
+
 class _LoginPageState extends State<LoginPage> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
- 
+
   final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
- 
+
   final _formKey = GlobalKey<FormState>();
   bool isLogin = true;
   bool isLoading = false;
@@ -26,13 +26,11 @@ class _LoginPageState extends State<LoginPage> {
   String errorMessage = '';
   String successMessage = '';
   bool _obscurePassword = true;
- 
-  // Email validation regex
+
   final RegExp _emailRegex = RegExp(
     r'^[a-zA-Z0-9.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$',
   );
- 
-  // Updated disposable domains list (only clearly disposable ones)
+
   final List<String> _disposableDomains = [
     'mailinator.com',
     'guerrillamail.com',
@@ -41,37 +39,36 @@ class _LoginPageState extends State<LoginPage> {
     'yopmail.com',
     'trashmail.com',
   ];
- 
+
   bool _isValidEmail(String email) {
     if (!_emailRegex.hasMatch(email)) return false;
     if (email.contains(' ')) return false;
     if (email.startsWith('.') || email.endsWith('.')) return false;
-   
+
     final parts = email.split('@');
     if (parts.length != 2) return false;
-   
+
     final domain = parts[1].toLowerCase();
     final domainParts = domain.split('.');
     if (domainParts.length < 2) return false;
     if (domainParts.any((part) => part.isEmpty)) return false;
-   
+
     return !_disposableDomains.contains(domain);
   }
- 
+
   Future<bool> _verifyEmailWithAPI(String email) async {
     const bool isDebugMode = bool.fromEnvironment('dart.vm.product');
     if (isDebugMode) return true;
- 
+
     const apiKey = 'YOUR_API_KEY';
     final url = Uri.parse('https://emailvalidation.abstractapi.com/v1/?api_key=$apiKey&email=$email');
-   
+
     try {
       final response = await http.get(url);
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final isValid = data['is_valid_format']['value'] ?? true;
         final isDisposable = data['is_disposable_email']['value'] ?? false;
-       
         return isValid && !isDisposable;
       }
       return _isValidEmail(email);
@@ -79,24 +76,23 @@ class _LoginPageState extends State<LoginPage> {
       return _isValidEmail(email);
     }
   }
- 
+
   Future<bool> _isEmailAlreadyRegistered(String email) async {
     try {
       final methods = await _auth.fetchSignInMethodsForEmail(email);
       if (methods.isNotEmpty) return true;
- 
+
       final query = await _firestore.collection('users')
           .where('email', isEqualTo: email)
           .limit(1)
           .get();
-     
+
       return query.docs.isNotEmpty;
     } catch (e) {
       return false;
     }
   }
- 
-  
+
   Future<void> _handleAuthentication() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -132,21 +128,21 @@ class _LoginPageState extends State<LoginPage> {
       errorMessage = '';
       successMessage = '';
     });
- 
+
     try {
       UserCredential userCredential = await _auth.signInWithEmailAndPassword(
         email: emailController.text.trim(),
         password: passwordController.text.trim(),
       );
- 
+
       if (!userCredential.user!.emailVerified) {
         await _auth.signOut();
         throw Exception("Email not verified. Please check your inbox.");
       }
- 
+
       final userDoc = await _firestore.collection('users').doc(userCredential.user!.uid).get();
       if (!userDoc.exists) throw Exception("User record not found");
- 
+
       final role = userDoc['role'];
       _navigateBasedOnRole(role);
     } catch (e) {
@@ -164,32 +160,31 @@ class _LoginPageState extends State<LoginPage> {
       setState(() => isLoading = false);
     }
   }
- 
- void _navigateBasedOnRole(String role) {
-  if (role == 'client') {
-    Navigator.pushReplacementNamed(context, '/client');
-  } else {
-    setState(() {
-      errorMessage = 'Access denied.';
-    });
-    _auth.signOut();
-  }
-}
 
- 
+  void _navigateBasedOnRole(String role) {
+    if (role == 'client') {
+      Navigator.pushReplacementNamed(context, '/client');
+    } else {
+      setState(() {
+        errorMessage = 'Access denied.';
+      });
+      _auth.signOut();
+    }
+  }
+
   Future<void> _resetPassword() async {
     final email = emailController.text.trim();
     if (email.isEmpty || !_emailRegex.hasMatch(email)) {
       setState(() => errorMessage = 'Please enter a valid email');
       return;
     }
- 
+
     setState(() {
       isSendingResetEmail = true;
       errorMessage = '';
       successMessage = '';
     });
- 
+
     try {
       await _auth.sendPasswordResetEmail(email: email);
       setState(() {
@@ -206,17 +201,17 @@ class _LoginPageState extends State<LoginPage> {
       setState(() => isSendingResetEmail = false);
     }
   }
- 
+
   Future<void> _resendVerificationEmail() async {
     final user = _auth.currentUser;
     if (user == null) return;
- 
+
     setState(() {
       isVerifyingEmail = true;
       errorMessage = '';
       successMessage = '';
     });
- 
+
     try {
       await user.sendEmailVerification();
       setState(() {
@@ -230,7 +225,7 @@ class _LoginPageState extends State<LoginPage> {
       setState(() => isVerifyingEmail = false);
     }
   }
- 
+
   String _getErrorMessage(String code) {
     switch (code) {
       case 'user-not-found':
@@ -253,7 +248,7 @@ class _LoginPageState extends State<LoginPage> {
         return 'Authentication failed: $code';
     }
   }
-  
+
   void _showErrorSnackbar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -277,9 +272,10 @@ class _LoginPageState extends State<LoginPage> {
       ),
     );
   }
-   final Color navyBlue = const Color(0xFF1C2D5E);
- 
-   @override
+
+  final Color navyBlue = const Color(0xFF1C2D5E);
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
@@ -291,14 +287,19 @@ class _LoginPageState extends State<LoginPage> {
             children: [
               Column(
                 children: [
-                  Text(
-                    'FF',
-                    style: TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: navyBlue),
-                  ),
-                  Text(
-                    'FLEX FACILITY',
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: navyBlue, letterSpacing: 1.5),
-                  ),
+                  Container(
+  width: 150,
+  height: 150,
+  decoration: BoxDecoration(
+    shape: BoxShape.circle,
+    color: Colors.black,
+    image: DecorationImage(
+      image: AssetImage('assets/images/flex_login/logo.png'),
+      fit: BoxFit.cover,
+    ),
+  ),
+),
+
                   const SizedBox(height: 16),
                   Text(
                     'Log in to your account',
@@ -307,7 +308,6 @@ class _LoginPageState extends State<LoginPage> {
                 ],
               ),
               const SizedBox(height: 40),
-
               Form(
                 key: _formKey,
                 child: Column(
@@ -333,7 +333,6 @@ class _LoginPageState extends State<LoginPage> {
                       },
                     ),
                     const SizedBox(height: 16),
-
                     TextFormField(
                       controller: passwordController,
                       obscureText: _obscurePassword,
@@ -358,7 +357,6 @@ class _LoginPageState extends State<LoginPage> {
                       },
                     ),
                     const SizedBox(height: 8),
-
                     Align(
                       alignment: Alignment.centerRight,
                       child: TextButton(
@@ -369,7 +367,6 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
                     const SizedBox(height: 24),
-
                     SizedBox(
                       width: double.infinity,
                       height: 50,
@@ -385,7 +382,6 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
                     const SizedBox(height: 24),
-
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -396,7 +392,6 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                       ],
                     ),
-
                     if (errorMessage.isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.only(top: 16),
@@ -416,7 +411,6 @@ class _LoginPageState extends State<LoginPage> {
                           ),
                         ),
                       ),
-
                     if (successMessage.isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.only(top: 16),

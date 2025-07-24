@@ -5,7 +5,7 @@ const sgMail = require("@sendgrid/mail");
 admin.initializeApp();
 sgMail.setApiKey(functions.config().sendgrid.key);
 
-// ✅ SEND EMAIL ON CREATE — First time a slot is created with bookings
+// ✅ SEND EMAIL ON CREATE
 exports.notifyBookingOnCreate = functions
   .runWith({ memory: "256MB", timeoutSeconds: 60 })
   .firestore.document("trainer_slots/{slotId}")
@@ -35,7 +35,7 @@ exports.notifyBookingOnCreate = functions
     await Promise.all(sendPromises);
   });
 
-// ✅ SEND EMAIL ON UPDATE — handles new bookings and cancellations
+// ✅ HANDLE BOOKING / CANCELLATION / RESCHEDULE
 exports.handleBookingAndCancellation = functions
   .runWith({ memory: "256MB", timeoutSeconds: 60 })
   .firestore.document("trainer_slots/{slotId}")
@@ -56,55 +56,54 @@ exports.handleBookingAndCancellation = functions
 
     const sendTasks = [];
 
-    // Check if this is a reschedule by looking for the flag
-    const isReschedule = after.is_reschedule === true;
+    // ✅ UPDATED: Detect reschedule from either before or after
+    const isReschedule = before.is_reschedule === true || after.is_reschedule === true;
 
-    // If reschedule, we should have exactly one new booking and one cancellation
     if (isReschedule && newlyBooked.length === 1 && cancelled.length === 1) {
       const email = newlyBooked[0];
+
+      await sgMail.send({
+        to: email,
+        from: { email: "bookings@archengineeringservices.com", name: "Flex Facility Bookings" },
+        subject: `🔁 Rescheduled – ${trainer}`,
+        text: `Hi there,\n\n🔁 Your session with ${trainer} has been rescheduled.\n\n📅 New Date: ${slotDate}\n⏰ New Time: ${slotTime}\n\nPlease arrive 5 minutes early.\n\nThanks,\nFlex Facility Team`,
+      }).then(() => console.log(`✅ Reschedule email sent to: ${email}`))
+        .catch((err) => console.error(`❌ Reschedule email error for ${email}:`, err));
+
+      // ✅ Clear the flag from after or before
+      if (after.is_reschedule) {
+        await change.after.ref.update({ is_reschedule: admin.firestore.FieldValue.delete() });
+      }
+
+      console.log("ℹ️ Reschedule logic completed.");
+      return; // ✅ Prevents fallback to normal booking/cancellation
+    }
+
+    // ✅ Normal booking
+    newlyBooked.forEach(email => {
       sendTasks.push(
         sgMail.send({
           to: email,
           from: { email: "bookings@archengineeringservices.com", name: "Flex Facility Bookings" },
-          subject: `🔁 Rescheduled – ${trainer}`,
-          text: `Hi there,\n\n🔁 Your session with ${trainer} has been rescheduled.\n\n📅 New Date: ${slotDate}\n⏰ New Time: ${slotTime}\n\nPlease arrive 5 minutes early.\n\nThanks,\nFlex Facility Team`,
-        }).then(() => console.log(`✅ Reschedule email sent to: ${email}`))
-          .catch((err) => console.error(`❌ Reschedule email error for ${email}:`, err))
+          subject: `✅ Booking Confirmed – ${trainer}`,
+          text: `Hi there,\n\n🎉 Your session with ${trainer} is confirmed!\n\n📅 Date: ${slotDate}\n⏰ Time: ${slotTime}\n\nPlease arrive 5 minutes early.\n\nThanks,\nFlex Facility Team`,
+        }).then(() => console.log(`✅ Booking confirmation email sent to: ${email}`))
+          .catch((err) => console.error(`❌ Booking confirmation error for ${email}:`, err))
       );
-    
-      // Clear the flag and return to avoid duplicate booking confirmation email
-      await change.after.ref.update({ is_reschedule: admin.firestore.FieldValue.delete() });
-      console.log("ℹ️ Cleared is_reschedule flag after reschedule");
-      return; // ✅ THIS LINE STOPS FURTHER BOOKING EMAIL
-    }
-    
-    else {
-      // Handle normal bookings
-      newlyBooked.forEach(email => {
-        sendTasks.push(
-          sgMail.send({
-            to: email,
-            from: { email: "bookings@archengineeringservices.com", name: "Flex Facility Bookings" },
-            subject: `✅ Booking Confirmed – ${trainer}`,
-            text: `Hi there,\n\n🎉 Your session with ${trainer} is confirmed!\n\n📅 Date: ${slotDate}\n⏰ Time: ${slotTime}\n\nPlease arrive 5 minutes early.\n\nThanks,\nFlex Facility Team`,
-          }).then(() => console.log(`✅ Booking confirmation email sent to: ${email}`))
-            .catch((err) => console.error(`❌ Booking confirmation error for ${email}:`, err))
-        );
-      });
+    });
 
-      // Handle cancellations
-      cancelled.forEach(email => {
-        sendTasks.push(
-          sgMail.send({
-            to: email,
-            from: { email: "bookings@archengineeringservices.com", name: "Flex Facility Bookings" },
-            subject: `❌ Booking Cancelled – ${trainer}`,
-            text: `Hi there,\n\nYour session with ${trainer} has been cancelled.\n\n📅 Date: ${slotDate}\n⏰ Time: ${slotTime}\n\nIf this was a mistake, you can rebook through the app.\n\nThanks,\nFlex Facility Team`,
-          }).then(() => console.log(`✅ Cancellation email sent to: ${email}`))
-            .catch((err) => console.error(`❌ Cancellation email error for ${email}:`, err))
-        );
-      });
-    }
+    // ✅ Normal cancellation
+    cancelled.forEach(email => {
+      sendTasks.push(
+        sgMail.send({
+          to: email,
+          from: { email: "bookings@archengineeringservices.com", name: "Flex Facility Bookings" },
+          subject: `❌ Booking Cancelled – ${trainer}`,
+          text: `Hi there,\n\nYour session with ${trainer} has been cancelled.\n\n📅 Date: ${slotDate}\n⏰ Time: ${slotTime}\n\nIf this was a mistake, you can rebook through the app.\n\nThanks,\nFlex Facility Team`,
+        }).then(() => console.log(`✅ Cancellation email sent to: ${email}`))
+          .catch((err) => console.error(`❌ Cancellation email error for ${email}:`, err))
+      );
+    });
 
     if (sendTasks.length > 0) {
       await Promise.all(sendTasks);
