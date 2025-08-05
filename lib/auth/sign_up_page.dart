@@ -103,15 +103,11 @@ class _SignupPageState extends State<SignupPage> {
           child: Column(
             children: [
               const SizedBox(height: 20),
-              Text(
-                "FF",
-                style: TextStyle(
-                  fontSize: 48,
-                  fontWeight: FontWeight.bold,
-                  color: navyBlue,
-                  letterSpacing: 2,
-                ),
+               Image.asset(
+                'assets/images/logo.webp', // <-- modified path
+                height: 150, // <-- modified height
               ),
+              
               const SizedBox(height: 4),
               Text(
                 "FLEX FACILITY ADMIN",

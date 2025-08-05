@@ -49,12 +49,15 @@ dev_dependencies:
   font_awesome_flutter: ^10.7.0
   percent_indicator: ^4.2.2
   flutter_native_splash: ^2.3.5
+  pdf: ^3.10.6
+  printing: ^5.11.0
+  open_file: ^3.3.2
   
 
 flutter:
   uses-material-design: true
   assets:
-    - assets/images/flex_logo.png
+    - assets/images/logo.webp
     
 flutter_native_splash:
   color: "#1C2D5E"

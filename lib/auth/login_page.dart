@@ -290,16 +290,14 @@ void _navigateBasedOnRole(String role) {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              
               Column(
                 children: [
-                  Text(
-                    'FF',
-                    style: TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: navyBlue),
-                  ),
-                  Text(
-                    'FLEX FACILITY',
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: navyBlue, letterSpacing: 1.5),
-                  ),
+                   Image.asset(
+              'assets/images/logo.webp', // Update path if needed
+              height: 150,
+              width: 150,
+            ),
                   const SizedBox(height: 16),
                   Text(
                     'Log in to your account',

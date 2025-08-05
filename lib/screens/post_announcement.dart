@@ -6,7 +6,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:intl/intl.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:url_launcher/url_launcher.dart'; // For opening PDFs
+import 'package:url_launcher/url_launcher.dart';
 
 class PostAnnouncementScreen extends StatefulWidget {
   const PostAnnouncementScreen({super.key});
@@ -76,10 +76,8 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
       final ref = FirebaseStorage.instance.ref().child(fileName);
       await ref.putFile(file);
       final downloadURL = await ref.getDownloadURL();
-      print("$folder uploaded: $downloadURL");
       return downloadURL;
     } catch (e) {
-      print("$folder upload failed: $e");
       return null;
     }
   }
@@ -127,7 +125,6 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
         'pdfUrl': pdfUrl,
         'timestamp': FieldValue.serverTimestamp(),
         'trainerName': trainerName.isNotEmpty ? trainerName : _trainerEmail,
-        // ✅ priority removed
       };
 
       if (docId != null) {
@@ -149,7 +146,6 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
         _editingDocId = null;
       });
     } catch (e) {
-      print('Post error: $e');
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error posting: ${e.toString()}')));
     } finally {
       setState(() => _isLoading = false);
@@ -166,6 +162,84 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
       _editingDocId = docId;
     });
   }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Post Announcement', style: TextStyle(color: Colors.white)),
+        backgroundColor: const Color(0xFF1A2B63),
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      backgroundColor: const Color(0xFFF5FAFF),
+      body: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(controller: _titleController, decoration: const InputDecoration(labelText: 'Title')),
+              const SizedBox(height: 12),
+              TextField(controller: _trainerNameController, decoration: const InputDecoration(labelText: 'Your Name (shown to users)')),
+              const SizedBox(height: 12),
+              TextField(controller: _messageController, maxLines: 4, decoration: const InputDecoration(labelText: 'Message')),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: _selectedCategory,
+                items: _categories.map((cat) => DropdownMenuItem(value: cat, child: Text(cat))).toList(),
+                onChanged: (val) => setState(() => _selectedCategory = val!),
+                decoration: const InputDecoration(labelText: 'Category'),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: _selectedAudience,
+                items: _audiences.map((aud) => DropdownMenuItem(value: aud, child: Text(aud))).toList(),
+                onChanged: (val) => setState(() => _selectedAudience = val!),
+                decoration: const InputDecoration(labelText: 'Audience'),
+              ),
+              const SizedBox(height: 12),
+              if (_selectedImage != null) Text('Image Selected: ${_selectedImage!.path.split('/').last}'),
+              ElevatedButton(onPressed: _pickImage, child: const Text('Pick Image')),
+              const SizedBox(height: 8),
+              if (_selectedPDF != null) Text('PDF Selected: ${_selectedPDF!.path.split('/').last}'),
+              ElevatedButton(onPressed: _pickPDF, child: const Text('Pick PDF')),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                onPressed: _isLoading ? null : () => _postAnnouncement(docId: _editingDocId),
+                child: _isLoading
+                    ? const CircularProgressIndicator()
+                    : Text(_editingDocId != null ? 'Update Announcement' : 'Post Announcement'),
+              ),
+              const SizedBox(height: 20),
+              TextButton(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const PostedAnnouncementsScreen()),
+                  );
+                },
+                child: const Text(
+                  'View Posted Announcements',
+                  style: TextStyle(color: Colors.blue, decoration: TextDecoration.underline),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class PostedAnnouncementsScreen extends StatefulWidget {
+  const PostedAnnouncementsScreen({super.key});
+
+  @override
+  State<PostedAnnouncementsScreen> createState() => _PostedAnnouncementsScreenState();
+}
+
+class _PostedAnnouncementsScreenState extends State<PostedAnnouncementsScreen> {
+  String _selectedFilter = 'All';
 
   String _emojiFromReaction(String reaction) {
     switch (reaction) {
@@ -186,193 +260,147 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Post Announcement',
-          style: TextStyle(color: Colors.white), // ✅ Fixed: White text
-        ),
+        title: const Text('Posted Announcements', style: TextStyle(color: Colors.white)),
         backgroundColor: const Color(0xFF1A2B63),
         iconTheme: const IconThemeData(color: Colors.white),
+        actions: [
+          DropdownButton<String>(
+            dropdownColor: const Color(0xFF1A2B63),
+            value: _selectedFilter,
+            items: ['All', 'General', 'Birthday', 'Event', 'Important']
+                .map((category) => DropdownMenuItem(
+                      value: category,
+                      child: Text(
+                        category,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ))
+                .toList(),
+            onChanged: (value) {
+              setState(() {
+                _selectedFilter = value!;
+              });
+            },
+          ),
+        ],
       ),
       backgroundColor: const Color(0xFFF5FAFF),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: _titleController,
-                decoration: const InputDecoration(labelText: 'Title'),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _trainerNameController,
-                decoration: const InputDecoration(labelText: 'Your Name (shown to users)'),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _messageController,
-                maxLines: 4,
-                decoration: const InputDecoration(labelText: 'Message'),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                value: _selectedCategory,
-                items: _categories.map((cat) => DropdownMenuItem(value: cat, child: Text(cat))).toList(),
-                onChanged: (val) => setState(() => _selectedCategory = val!),
-                decoration: const InputDecoration(labelText: 'Category'),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                value: _selectedAudience,
-                items: _audiences.map((aud) => DropdownMenuItem(value: aud, child: Text(aud))).toList(),
-                onChanged: (val) => setState(() => _selectedAudience = val!),
-                decoration: const InputDecoration(labelText: 'Audience'),
-              ),
-              const SizedBox(height: 12),
-              if (_selectedImage != null) Image.file(_selectedImage!, height: 150),
-              ElevatedButton(
-                onPressed: _pickImage,
-                child: const Text('Pick Image'),
-              ),
-              const SizedBox(height: 8),
-              if (_selectedPDF != null) Text('PDF Selected: ${_selectedPDF!.path.split('/').last}'),
-              ElevatedButton(
-                onPressed: _pickPDF,
-                child: const Text('Pick PDF'),
-              ),
-              const SizedBox(height: 12),
-              ElevatedButton(
-                onPressed: _isLoading ? null : () => _postAnnouncement(docId: _editingDocId),
-                child: _isLoading
-                    ? const CircularProgressIndicator()
-                    : Text(_editingDocId != null ? 'Update Announcement' : 'Post Announcement'),
-              ),
-              const SizedBox(height: 20),
-              const Divider(),
-              const Text('Previous Announcements:', style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 10),
-              StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('announcements')
-                    .orderBy('timestamp', descending: true)
-                    .snapshots(),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: const Color(0xFF1A2B63),
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const PostAnnouncementScreen()),
+          );
+        },
+        child: const Icon(Icons.add, color: Colors.white),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('announcements')
+              .orderBy('timestamp', descending: true)
+              .snapshots(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+              return const Center(child: Text('No announcements found.'));
+            }
 
-                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                    return const Text('No announcements found.');
-                  }
+            final filteredDocs = _selectedFilter == 'All'
+                ? snapshot.data!.docs
+                : snapshot.data!.docs.where((doc) {
+                    final data = doc.data() as Map<String, dynamic>;
+                    return data['category'] == _selectedFilter;
+                  }).toList();
 
-                  return SizedBox(
-                    height: MediaQuery.of(context).size.height * 0.6,
-                    child: ListView.builder(
-                      itemCount: snapshot.data!.docs.length,
-                      itemBuilder: (context, index) {
-                        final doc = snapshot.data!.docs[index];
-                        final data = doc.data() as Map<String, dynamic>;
-                        final reactions = data['reactions'] as Map<String, dynamic>?;
+            if (filteredDocs.isEmpty) {
+              return Center(child: Text('No $_selectedFilter announcements found.'));
+            }
 
-                        final Timestamp? timestamp = data['timestamp'];
-                        final DateTime postTime = timestamp?.toDate() ?? DateTime.now();
-                        final Duration difference = DateTime.now().difference(postTime);
-                        final bool isNew = difference.inHours < 24;
+            return ListView.builder(
+              itemCount: filteredDocs.length,
+              itemBuilder: (context, index) {
+                final doc = filteredDocs[index];
+                final data = doc.data() as Map<String, dynamic>;
+                final reactions = data['reactions'] as Map<String, dynamic>?;
 
-                        return Card(
-                          color: isNew ? const Color(0xFFE0F2FF) : const Color(0xFFFFE4E1),
-                          margin: const EdgeInsets.symmetric(vertical: 8),
-                          child: ListTile(
-                            title: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                if (data['trainerName'] != null)
-                                  Padding(
-                                    padding: const EdgeInsets.only(bottom: 4),
-                                    child: Text(
-                                      'Posted by: ${data['trainerName']}',
-                                      style: const TextStyle(fontWeight: FontWeight.bold),
-                                    ),
-                                  ),
-                                Text(data['title'] ?? ''),
-                              ],
-                            ),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(data['message'] ?? ''),
-                                if (data['imageUrl'] != null)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 8),
-                                    child: Image.network(
-                                      data['imageUrl'],
-                                      height: 150,
-                                      fit: BoxFit.cover,
-                                    ),
-                                  ),
-                                if (data['pdfUrl'] != null)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 8),
-                                    child: InkWell(
-                                      onTap: () async {
-                                        final url = Uri.parse(data['pdfUrl']);
-                                        if (await canLaunchUrl(url)) {
-                                          await launchUrl(url);
-                                        } else {
-                                          ScaffoldMessenger.of(context).showSnackBar(
-                                            const SnackBar(content: Text('Could not open PDF')),
-                                          );
-                                        }
-                                      },
-                                      child: const Text(
-                                        'Open Attached PDF',
-                                        style: TextStyle(color: Colors.blue, decoration: TextDecoration.underline),
-                                      ),
-                                    ),
-                                  ),
-                                Text('Category: ${data['category']}'),
-                                Text('Audience: ${data['audience']}'),
-                                if (timestamp != null)
-                                  Text('Posted on: ${DateFormat.yMMMd().add_jm().format(postTime)}'),
-                                const SizedBox(height: 4),
-                                if (reactions != null && reactions.isNotEmpty) ...[
-                                  Text('Reacted: ${reactions.values.map((r) => _emojiFromReaction(r)).join(' ')}'),
-                                  Text(
-                                    'Total Reactions: ${reactions.length}',
-                                    style: const TextStyle(fontWeight: FontWeight.bold),
-                                  ),
-                                ] else ...[
-                                  const Text('Reacted: -'),
-                                  const Text('Total Reactions: 0'),
-                                ],
-                              ],
-                            ),
-                            trailing: PopupMenuButton<String>(
-                              onSelected: (value) {
-                                if (value == 'edit') {
-                                  _loadForEditing(data, doc.id);
-                                } else if (value == 'delete') {
-                                  FirebaseFirestore.instance.collection('announcements').doc(doc.id).delete();
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Announcement deleted')),
-                                  );
-                                }
-                              },
-                              itemBuilder: (context) => [
-                                const PopupMenuItem(value: 'edit', child: Text('Edit')),
-                                const PopupMenuItem(value: 'delete', child: Text('Delete')),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
+                final Timestamp? timestamp = data['timestamp'];
+                final DateTime postTime = timestamp?.toDate() ?? DateTime.now();
+                final bool isNew = DateTime.now().difference(postTime).inHours < 24;
+
+                return Card(
+                  color: isNew ? const Color(0xFFE0F2FF) : const Color(0xFFFFE4E1),
+                  margin: const EdgeInsets.symmetric(vertical: 8),
+                  child: ListTile(
+                    title: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (data['trainerName'] != null)
+                          Text('Posted by: ${data['trainerName']}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        Text(data['title'] ?? ''),
+                      ],
                     ),
-                  );
-                },
-              ),
-            ],
-          ),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(data['message'] ?? ''),
+                        if (data['imageUrl'] != null)
+                          GestureDetector(
+                            onTap: () {
+                              showDialog(
+                                context: context,
+                                builder: (context) => Dialog(
+                                  child: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Image.network(data['imageUrl']),
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(context),
+                                          child: const Text('Close'),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                            child: const Text('View Image', style: TextStyle(color: Colors.blue, decoration: TextDecoration.underline)),
+                          ),
+                        if (data['pdfUrl'] != null)
+                          InkWell(
+                            onTap: () async {
+                              final url = data['pdfUrl'];
+                              if (await canLaunch(url)) {
+                                await launch(url);
+                              } else {
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open PDF')));
+                              }
+                            },
+                            child: const Text('Open Attached PDF', style: TextStyle(color: Colors.blue, decoration: TextDecoration.underline)),
+                          ),
+                        Text('Category: ${data['category']}'),
+                        Text('Audience: ${data['audience']}'),
+                        if (timestamp != null) Text('Posted on: ${DateFormat.yMMMd().add_jm().format(postTime)}'),
+                        if (reactions != null && reactions.isNotEmpty) ...[
+                          Text('Reacted: ${reactions.values.map((r) => _emojiFromReaction(r)).join(' ')}'),
+                          Text('Total Reactions: ${reactions.length}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        ] else ...[
+                          const Text('Reacted: -'),
+                          const Text('Total Reactions: 0'),
+                        ],
+                      ],
+                    ),
+                  ),
+                );
+              },
+            );
+          },
         ),
       ),
     );
