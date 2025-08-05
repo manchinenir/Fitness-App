@@ -26,53 +26,70 @@ class _MySchedulePageState extends State<MySchedulePage> with SingleTickerProvid
     super.initState();
     _listenToBookedSlots(); // real-time listener
   }
+void _listenToBookedSlots() {
+  final user = _auth.currentUser;
+  if (user == null) return;
 
-  void _listenToBookedSlots() {
-    final user = _auth.currentUser;
-    if (user == null) return;
+  _firestore
+      .collection('trainer_slots')
+      .where('booked_by', arrayContains: user.uid)
+      .snapshots()
+      .listen((snapshot) {
+    final now = DateTime.now();
+    List<Map<String, dynamic>> past = [];
+    List<Map<String, dynamic>> upcoming = [];
 
-    _firestore
-        .collection('trainer_slots')
-        .where('booked_by', arrayContains: user.uid)
-        .snapshots()
-        .listen((snapshot) {
-      final now = DateTime.now();
-      List<Map<String, dynamic>> past = [];
-      List<Map<String, dynamic>> upcoming = [];
+    for (var doc in snapshot.docs) {
+      final data = doc.data();
 
-      for (var doc in snapshot.docs) {
-        final data = doc.data();
+     DateTime rawDate = DateTime.now();
+if (data['date'] is Timestamp) {
+  rawDate = (data['date'] as Timestamp).toDate().toLocal();
+}
 
-        DateTime date;
-        if (data['date'] is Timestamp) {
-          date = (data['date'] as Timestamp).toDate().toLocal(); // ✅ FIXED: Preserve full local DateTime
-        } else {
-          date = DateTime.now(); // fallback
-        }
+String timeStr = (data['time'] ?? '').split(' - ').first.trim();
+TimeOfDay? timeOfDay;
+try {
+  final parsed = DateFormat.jm().parseLoose(timeStr);
+  timeOfDay = TimeOfDay(hour: parsed.hour, minute: parsed.minute);
+} catch (e) {
+  timeOfDay = const TimeOfDay(hour: 0, minute: 0); // fallback
+}
 
-        final slot = {
-          'id': doc.id,
-          'date': date,
-          'time': data['time'] ?? '',
-          'trainer': data['trainer_name'] ?? 'Unknown Trainer',
-          'status': data['status'] ?? 'Confirmed',
-          'docRef': doc.reference,
-        };
+final slotDateTime = DateTime(
+  rawDate.year,
+  rawDate.month,
+  rawDate.day,
+  timeOfDay.hour,
+  timeOfDay.minute,
+);
 
-        if (date.isBefore(now)) {
-          past.add(slot);
-        } else {
-          upcoming.add(slot);
-        }
+
+      final slot = {
+        'id': doc.id,
+        'date': slotDateTime,
+        'time': data['time'] ?? '',
+        'trainer': data['trainer_name'] ?? 'Unknown Trainer',
+        'status': data['status'] ?? 'Confirmed',
+        'docRef': doc.reference,
+      };
+
+      if (slotDateTime.isBefore(now)) {
+        past.add(slot);
+      } else {
+        upcoming.add(slot);
       }
+    }
 
-      setState(() {
-        _pastSlots = past;
-        _upcomingSlots = upcoming;
-        _isLoading = false;
-      });
+    setState(() {
+      _pastSlots = past;
+      _upcomingSlots = upcoming;
+      _isLoading = false;
     });
-  }
+  });
+}
+
+  
 
   Future<void> _cancelBooking(DocumentReference docRef) async {
     final user = _auth.currentUser;

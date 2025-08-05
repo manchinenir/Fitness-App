@@ -11,6 +11,7 @@ import 'schedule_screen.dart';
 import 'booking_confirmation_page.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'post_announcement.dart';
+import 'profilescreen.dart';
 
 
 class DashboardItem {
@@ -287,7 +288,7 @@ void initState() {
                     icon: Icons.person,
                     label: 'My Profile',
                     color: Colors.red.shade400,
-                    action: () {}, // add navigation if needed
+                    targetScreen:ProfileScreen(), // add navigation if needed
                   ),
                   DashboardItem(
                     icon: Icons.announcement,

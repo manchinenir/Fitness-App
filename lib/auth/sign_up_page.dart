@@ -59,8 +59,8 @@ class _SignupPageState extends State<SignupPage> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Account created! Please verify your email.'),
+          const SnackBar(
+            content: Text('Account created! Please verify your email.'),
             backgroundColor: Colors.green,
             behavior: SnackBarBehavior.floating,
           ),
@@ -102,25 +102,11 @@ class _SignupPageState extends State<SignupPage> {
           child: Column(
             children: [
               const SizedBox(height: 20),
-              Text(
-                "FF",
-                style: TextStyle(
-                  fontSize: 48,
-                  fontWeight: FontWeight.bold,
-                  color: navyBlue,
-                  letterSpacing: 2,
-                ),
+              Image.asset(
+                'assets/images/flex_login/logo.png',
+                height: 150,
               ),
               const SizedBox(height: 4),
-              Text(
-                "FLEX FACILITY",
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w600,
-                  color: navyBlue,
-                  letterSpacing: 1.5,
-                ),
-              ),
               const SizedBox(height: 12),
               Text(
                 "Create your account",
