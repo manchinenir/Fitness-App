@@ -142,150 +142,143 @@ class _ClientBookSlotState extends State<ClientBookSlot> {
   }
 
   // Refactored _cancelBooking to use a docId string directly
- Future<void> _cancelBooking(String docId, {bool suppressError = false}) async {
-  final currentUser = FirebaseAuth.instance.currentUser;
-  if (currentUser == null) return;
+  Future<void> _cancelBooking(String docId, {bool suppressError = false}) async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
 
-  if (!suppressError) setState(() => _isLoading = true);
-  
-  try {
-    await FirebaseFirestore.instance.runTransaction((transaction) async {
-      final docRef = FirebaseFirestore.instance.collection('trainer_slots').doc(docId);
-      final doc = await transaction.get(docRef);
+    if (!suppressError) setState(() => _isLoading = true);
+    
+    try {
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        final docRef = FirebaseFirestore.instance.collection('trainer_slots').doc(docId);
+        final doc = await transaction.get(docRef);
 
-      if (!doc.exists) {
-        if (!suppressError) throw Exception('Slot document not found');
-        return; // skip gracefully
-      }
+        if (!doc.exists) {
+          if (!suppressError) throw Exception('Slot document not found');
+          return; // skip gracefully
+        }
 
-      List bookedBy = List.from(doc['booked_by'] ?? []);
-      List bookedNames = List.from(doc['booked_names'] ?? []);
-      List bookedEmails = List.from(doc['booked_emails'] ?? []);
+        List bookedBy = List.from(doc['booked_by'] ?? []);
+        List bookedNames = List.from(doc['booked_names'] ?? []);
+        List bookedEmails = List.from(doc['booked_emails'] ?? []);
 
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(currentUser.uid)
-          .get();
-          
-      final userEmail = userDoc['email'] ?? '';
-      final userName = userDoc['name'] ?? 'Client';
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(currentUser.uid)
+            .get();
+            
+        final userEmail = userDoc['email'] ?? '';
+        final userName = userDoc['name'] ?? 'Client';
 
-      final userIndex = bookedBy.indexOf(currentUser.uid);
-      if (userIndex == -1) {
-        if (!suppressError) throw Exception('No booking found for current user');
-        return;
-      }
+        final userIndex = bookedBy.indexOf(currentUser.uid);
+        if (userIndex == -1) {
+          if (!suppressError) throw Exception('No booking found for current user');
+          return;
+        }
 
-      bookedBy.removeAt(userIndex);
-      bookedNames.removeAt(userIndex);
-      bookedEmails.removeAt(userIndex);
+        bookedBy.removeAt(userIndex);
+        bookedNames.removeAt(userIndex);
+        bookedEmails.removeAt(userIndex);
 
-      transaction.update(docRef, {
-        'booked': bookedBy.length,
-        'booked_by': bookedBy,
-        'booked_names': bookedNames,
-        'booked_emails': bookedEmails,
-        'last_updated': FieldValue.serverTimestamp(),
+        transaction.update(docRef, {
+          'booked': bookedBy.length,
+          'booked_by': bookedBy,
+          'booked_names': bookedNames,
+          'booked_emails': bookedEmails,
+          'last_updated': FieldValue.serverTimestamp(),
+        });
       });
-    });
 
-    if (!suppressError) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Booking cancelled successfully'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    }
+      if (!suppressError) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Booking cancelled successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
 
-    if (!suppressError) setState(() {});
-  } catch (e) {
-    if (!suppressError) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to cancel booking: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (!suppressError) setState(() {});
+    } catch (e) {
+      if (!suppressError) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to cancel booking: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      if (!suppressError) debugPrint('Cancellation error: $e');
+    } finally {
+      if (!suppressError) setState(() => _isLoading = false);
     }
-    if (!suppressError) debugPrint('Cancellation error: $e');
-  } finally {
-    if (!suppressError) setState(() => _isLoading = false);
   }
-}
-
 
   void showSlotPopup(String time) async {
-  if (_isLoading) return;
-  final currentUser = FirebaseAuth.instance.currentUser;
-  if (currentUser == null) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Please sign in to book slots')),
-    );
-    return;
-  }
+    if (_isLoading) return;
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please sign in to book slots')),
+      );
+      return;
+    }
 
-  final selectedDate = _selectedDate ?? _focusedDate;
-  final dateKey = DateFormat('yyyy-MM-dd').format(selectedDate);
-  final docId = "$dateKey|$time";
-  final doc = await FirebaseFirestore.instance.collection('trainer_slots').doc(docId).get();
-  final isBookedByUser = doc.exists && (doc['booked_by'] ?? []).contains(currentUser.uid);
-  final isFull = doc.exists && (doc['booked_by'] ?? []).length >= slotCapacity;
+    final selectedDate = _selectedDate ?? _focusedDate;
+    final dateKey = DateFormat('yyyy-MM-dd').format(selectedDate);
+    final docId = "$dateKey|$time";
+    final doc = await FirebaseFirestore.instance.collection('trainer_slots').doc(docId).get();
+    final isBookedByUser = doc.exists && (doc['booked_by'] ?? []).contains(currentUser.uid);
+    final isFull = doc.exists && (doc['booked_by'] ?? []).length >= slotCapacity;
 
-  showDialog(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: Text(isBookedByUser ? 'Cancel Slot' : isFull ? 'Slot Full' : 'Book Slot'),
-      content: Text(isBookedByUser
-          ? 'Do you want to cancel this booking at $time?'
-          : isFull
-              ? 'This slot is already full'
-              : 'Do you want to proceed to book this slot at $time?'),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('No'),
-        ),
-        if (!isFull || isBookedByUser)
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(isBookedByUser ? 'Cancel Slot' : isFull ? 'Slot Full' : 'Book Slot'),
+        content: Text(isBookedByUser
+            ? 'Do you want to cancel this booking at $time?'
+            : isFull
+                ? 'This slot is already full'
+                : 'Do you want to proceed to book this slot at $time?'),
+        actions: [
           TextButton(
-            onPressed: () async {
-              Navigator.pop(context);
-
-              if (isBookedByUser) {
-                // Just cancel
-                await _cancelBooking(docId);
-              } else {
-                // Proceed to Booking Confirmation Page first (don't cancel old yet)
-               
-// In showSlotPopup method, update the BookingConfirmationPage navigation:
-final result = await Navigator.push(
-  context,
-  MaterialPageRoute(
-    builder: (context) => BookingConfirmationPage(
-      selectedDate: selectedDate,
-      selectedTime: time,
-      trainerName: trainerName,
-      slotCapacity: slotCapacity,
-      rescheduleSlot: widget.rescheduleSlot, // Pass the reschedule slot
-    ),
-  ),
-);
-
-if (widget.rescheduleSlot != null) {
-  final oldDocId = widget.rescheduleSlot!['id'];
-  await _cancelBooking(oldDocId, suppressError: true); // ✅ Important change
-}
-
-
-                setState(() {});
-              }
-            },
-            child: Text(isBookedByUser ? 'Cancel Booking' : 'Proceed'),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('No'),
           ),
-      ],
-    ),
-  );
-}
+          if (!isFull || isBookedByUser)
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(context);
+
+                if (isBookedByUser) {
+                  // Just cancel
+                  await _cancelBooking(docId);
+                } else {
+                  // Go to confirmation. Old-slot cancel is handled atomically there.
+                  final result = await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => BookingConfirmationPage(
+                        selectedDate: selectedDate,
+                        selectedTime: time,
+                        trainerName: trainerName,
+                        slotCapacity: slotCapacity,
+                        rescheduleSlot: widget.rescheduleSlot,
+                      ),
+                    ),
+                  );
+
+                  if (result == true) {
+                    setState(() {}); // refresh UI
+                  }
+                }
+              },
+              child: Text(isBookedByUser ? 'Cancel Booking' : 'Proceed'),
+            ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -383,7 +376,7 @@ if (widget.rescheduleSlot != null) {
                           );
                         }
                         if (snapshot.hasError) {
-                           return Padding(
+                          return Padding(
                             padding: const EdgeInsets.symmetric(vertical: 24.0),
                             child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.red)),
                           );

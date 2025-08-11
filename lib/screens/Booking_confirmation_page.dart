@@ -27,110 +27,124 @@ class _BookingConfirmationPageState extends State<BookingConfirmationPage> {
   bool _loading = false;
   bool _success = false;
 
-Future<void> _cancelOldSlot(String docId) async {
-  final user = FirebaseAuth.instance.currentUser;
-  if (user == null) return;
-
-  final docRef = FirebaseFirestore.instance.collection('trainer_slots').doc(docId);
-  final doc = await docRef.get();
-  if (!doc.exists) return;
-
-  final data = doc.data()!;
-  List bookedBy = List.from(data['booked_by'] ?? []);
-  List bookedNames = List.from(data['booked_names'] ?? []);
-  List bookedEmails = List.from(data['booked_emails'] ?? []);
-
-  if (!bookedBy.contains(user.uid)) {
-    print("User not found in previous booking. Skipping cancel step.");
-    return; // Don't throw, just skip cancel
-  }
-
-  final userEmail = user.email ?? '';
-  final userName = user.displayName ?? 'Client';
-
-  await docRef.update({
-    'booked': FieldValue.increment(-1),
-    'booked_by': FieldValue.arrayRemove([user.uid]),
-    'booked_names': FieldValue.arrayRemove([userName]),
-    'booked_emails': FieldValue.arrayRemove([userEmail]),
-    'last_updated': FieldValue.serverTimestamp(),
-  });
-}
-
   Future<void> _confirmBooking() async {
     setState(() => _loading = true);
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    final docId = "${DateFormat('yyyy-MM-dd').format(widget.selectedDate)}|${widget.selectedTime}";
-    final docRef = FirebaseFirestore.instance.collection('trainer_slots').doc(docId);
-
-    final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-    final userName = userDoc['name'] ?? 'Client';
-    final userEmail = userDoc['email'] ?? '';
-
-    final startTimeRaw = widget.selectedTime.split(" - ")[0].trim();
-    final timeParts = startTimeRaw.split(RegExp(r'[:\s]'));
-
-    int hour = int.parse(timeParts[0]);
-    int minute = int.parse(timeParts[1]);
-    String amPm = timeParts[2];
-
-    if (amPm == "PM" && hour != 12) hour += 12;
-    if (amPm == "AM" && hour == 12) hour = 0;
-
-    final fullDateTime = DateTime(
-      widget.selectedDate.year,
-      widget.selectedDate.month,
-      widget.selectedDate.day,
-      hour,
-      minute,
-    );
+    if (user == null) {
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please sign in to continue')),
+      );
+      return;
+    }
 
     try {
-      await FirebaseFirestore.instance.runTransaction((transaction) async {
-        final snapshot = await transaction.get(docRef);
-        List bookedBy = snapshot.exists ? List.from(snapshot['booked_by']) : [];
-        List bookedNames = snapshot.exists ? List.from(snapshot['booked_names']) : [];
-        List bookedEmails = snapshot.exists ? List.from(snapshot['booked_emails']) : [];
+      // Get canonical name/email to store in arrays
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      final userName = userDoc.data()?['name'] ?? 'Client';
+      final userEmail = userDoc.data()?['email'] ?? '';
 
-        if (bookedBy.contains(user.uid)) {
-          throw Exception('You already booked this slot.');
+      // New slot doc id
+      final dateKey = DateFormat('yyyy-MM-dd').format(widget.selectedDate);
+      final newDocId = "$dateKey|${widget.selectedTime}";
+      final newRef = FirebaseFirestore.instance.collection('trainer_slots').doc(newDocId);
+
+      // Parse start time to DateTime
+      final startTimeRaw = widget.selectedTime.split(' - ').first.trim();
+      final parsedStart = DateFormat.jm().parseLoose(startTimeRaw);
+      final fullDateTime = DateTime(
+        widget.selectedDate.year,
+        widget.selectedDate.month,
+        widget.selectedDate.day,
+        parsedStart.hour,
+        parsedStart.minute,
+      );
+
+      // Old slot (if rescheduling)
+      final String? oldDocId = widget.rescheduleSlot != null
+          ? (widget.rescheduleSlot!['id'] as String?)
+          : null;
+      final oldRef = (oldDocId != null && oldDocId.isNotEmpty)
+          ? FirebaseFirestore.instance.collection('trainer_slots').doc(oldDocId)
+          : null;
+
+      await FirebaseFirestore.instance.runTransaction((txn) async {
+        // ----- READS FIRST -----
+        final newSnap = await txn.get(newRef);
+
+        DocumentSnapshot<Map<String, dynamic>>? oldSnap;
+        if (oldRef != null) {
+          oldSnap = await txn.get(oldRef);
         }
-        if (bookedBy.length >= widget.slotCapacity) {
+
+        // ----- PREP MUTATIONS (NEW) -----
+        List bookedByNew = [];
+        List bookedNamesNew = [];
+        List bookedEmailsNew = [];
+
+        if (newSnap.exists) {
+          final d = newSnap.data() as Map<String, dynamic>;
+          bookedByNew     = List.from(d['booked_by'] ?? []);
+          bookedNamesNew  = List.from(d['booked_names'] ?? []);
+          bookedEmailsNew = List.from(d['booked_emails'] ?? []);
+        }
+
+        final alreadyInNew = bookedByNew.contains(user.uid);
+        if (!alreadyInNew && bookedByNew.length >= widget.slotCapacity) {
           throw Exception('This slot is full.');
         }
-
-        bookedBy.add(user.uid);
-        bookedNames.add(userName);
-        bookedEmails.add(userEmail);
-
-       // In your _confirmBooking function:
-final Map<String, dynamic> dataToSave = {
-  'date': fullDateTime,
-  'time': widget.selectedTime,
-  'trainer_name': widget.trainerName,
-  'booked': bookedBy.length,
-  'booked_by': bookedBy,
-  'booked_names': bookedNames,
-  'booked_emails': bookedEmails,
-  'capacity': widget.slotCapacity,
-  'last_updated': FieldValue.serverTimestamp(),
-  'is_reschedule': widget.rescheduleSlot != null, // This is the key line
-  'status': widget.rescheduleSlot != null ? 'Rescheduled' : 'Confirmed',
-};
-
-        if (widget.rescheduleSlot != null) {
-          dataToSave['is_reschedule'] = true;
+        if (!alreadyInNew) {
+          bookedByNew.add(user.uid);
+          bookedNamesNew.add(userName);
+          bookedEmailsNew.add(userEmail);
         }
 
-        transaction.set(docRef, dataToSave, SetOptions(merge: true));
-      });
+        // ----- PREP MUTATIONS (OLD) -----
+        List? bookedByOld, bookedNamesOld, bookedEmailsOld;
+        if (oldSnap != null && oldSnap.exists) {
+          final od = oldSnap.data() as Map<String, dynamic>;
+          bookedByOld     = List.from(od['booked_by'] ?? []);
+          bookedNamesOld  = List.from(od['booked_names'] ?? []);
+          bookedEmailsOld = List.from(od['booked_emails'] ?? []);
 
-      if (widget.rescheduleSlot != null) {
-        final oldDocId = widget.rescheduleSlot!['id'];
-        await _cancelOldSlot(oldDocId);
-      }
+          final idx = bookedByOld.indexOf(user.uid);
+          if (idx != -1) {
+            bookedByOld.removeAt(idx);
+            if (idx < bookedNamesOld.length)  bookedNamesOld.removeAt(idx);
+            if (idx < bookedEmailsOld.length) bookedEmailsOld.removeAt(idx);
+          }
+        }
+
+        // ----- WRITES AFTER ALL READS -----
+        txn.set(newRef, {
+          'date': Timestamp.fromDate(fullDateTime),
+          'time': widget.selectedTime,
+          'trainer_name': widget.trainerName,
+          'capacity': widget.slotCapacity,
+          'booked': bookedByNew.length,
+          'booked_by': bookedByNew,
+          'booked_names': bookedNamesNew,
+          'booked_emails': bookedEmailsNew,
+          'last_updated': FieldValue.serverTimestamp(),
+          'status_by_user': {
+            user.uid: widget.rescheduleSlot != null ? 'Rescheduled' : 'Confirmed'
+          },
+        }, SetOptions(merge: true));
+
+        if (oldRef != null && oldSnap != null && oldSnap.exists) {
+          txn.update(oldRef, {
+            'booked': bookedByOld!.length,
+            'booked_by': bookedByOld,
+            'booked_names': bookedNamesOld,
+            'booked_emails': bookedEmailsOld,
+            'last_updated': FieldValue.serverTimestamp(),
+            'status_by_user': { user.uid: 'Cancelled' },
+          });
+        }
+      });
 
       setState(() {
         _loading = false;
@@ -140,7 +154,7 @@ final Map<String, dynamic> dataToSave = {
       setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text("Error: ${e.toString()}"),
+          content: Text('Error: ${e.toString()}'),
           behavior: SnackBarBehavior.floating,
           backgroundColor: Colors.red,
         ),
@@ -191,11 +205,10 @@ final Map<String, dynamic> dataToSave = {
                     ),
                     const SizedBox(height: 24),
                     _buildDetailRow(Icons.person, 'Trainer:', widget.trainerName),
-                    _buildDetailRow(Icons.calendar_month, 'Date:', 
-                      DateFormat('EEEE, MMMM d').format(widget.selectedDate)),
+                    _buildDetailRow(Icons.calendar_month, 'Date:',
+                        DateFormat('EEEE, MMMM d').format(widget.selectedDate)),
                     _buildDetailRow(Icons.access_time, 'Time:', widget.selectedTime),
                     const SizedBox(height: 24),
-                   
                   ],
                 ),
               ),
@@ -206,8 +219,8 @@ final Map<String, dynamic> dataToSave = {
                 : ElevatedButton(
                     onPressed: _confirmBooking,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: widget.rescheduleSlot != null 
-                          ? Colors.orange.shade700 
+                      backgroundColor: widget.rescheduleSlot != null
+                          ? Colors.orange.shade700
                           : const Color(0xFF1C2D5E),
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
@@ -233,41 +246,6 @@ final Map<String, dynamic> dataToSave = {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildDetailRow(IconData icon, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 24, color: Colors.grey.shade600),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    color: Colors.grey.shade600,
-                    fontSize: 14,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  value,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -316,8 +294,7 @@ final Map<String, dynamic> dataToSave = {
                     _buildSuccessDetailRow('Trainer:', widget.trainerName),
                     const Divider(height: 24),
                     _buildSuccessDetailRow(
-                      'Date:', 
-                      DateFormat('EEEE, MMMM d').format(widget.selectedDate)),
+                        'Date:', DateFormat('EEEE, MMMM d').format(widget.selectedDate)),
                     const Divider(height: 24),
                     _buildSuccessDetailRow('Time:', widget.selectedTime),
                   ],
@@ -356,6 +333,41 @@ final Map<String, dynamic> dataToSave = {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 24, color: Colors.grey.shade600),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: Colors.grey.shade600,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -5,6 +5,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 
+const Color kPrimary = Color(0xFF1C2D5E); // Navy blue you shared
+
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({Key? key}) : super(key: key);
 
@@ -26,10 +28,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _loadUserInfo() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
-      final snapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
+      final snapshot =
+          await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
       if (snapshot.exists) {
         setState(() {
           profileName = snapshot.data()?['name'] ?? 'Your Name';
@@ -53,13 +53,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F3FF),
+      backgroundColor: const Color(0xFFF5F8FF),
       appBar: AppBar(
         title: const Text(
           'My Profile',
           style: TextStyle(color: Colors.white),
         ),
-        backgroundColor: Colors.deepPurple,
+        backgroundColor: kPrimary,
         iconTheme: const IconThemeData(color: Colors.white),
         elevation: 4,
       ),
@@ -74,8 +74,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   radius: 60,
                   backgroundImage: _imageFile != null
                       ? FileImage(_imageFile!)
-                      : const AssetImage('assets/profile.jpg')
-                          as ImageProvider,
+                      : const AssetImage('assets/profile.jpg') as ImageProvider,
                 ),
                 Positioned(
                   bottom: 0,
@@ -94,8 +93,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               offset: Offset(1, 1))
                         ],
                       ),
-                      child: const Icon(Icons.edit,
-                          size: 20, color: Colors.deepPurple),
+                      child: const Icon(Icons.edit, size: 20, color: kPrimary),
                     ),
                   ),
                 ),
@@ -181,8 +179,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           leading: CircleAvatar(
-            backgroundColor: Colors.deepPurple.shade100,
-            child: Icon(icon, color: Colors.deepPurple),
+            backgroundColor: kPrimary.withOpacity(0.12),
+            child: Icon(icon, color: kPrimary),
           ),
           title: Text(
             label,
@@ -223,10 +221,8 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
   Future<void> _loadUserInfo() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
+      final doc =
+          await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
 
       if (doc.exists) {
         final data = doc.data()!;
@@ -250,6 +246,7 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
         'phone': phoneController.text.trim(),
       });
 
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Profile updated')),
       );
@@ -265,12 +262,12 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF6F0FF),
+      backgroundColor: const Color(0xFFF5F8FF),
       appBar: AppBar(
-        backgroundColor: Colors.deepPurple,
+        backgroundColor: kPrimary,
         iconTheme: const IconThemeData(color: Colors.white),
-        title: const Text('Personal Information',
-            style: TextStyle(color: Colors.white)),
+        title:
+            const Text('Personal Information', style: TextStyle(color: Colors.white)),
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -323,7 +320,7 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
                     Center(
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.deepPurple,
+                          backgroundColor: kPrimary,
                         ),
                         onPressed: () {
                           if (_isEditing) {
@@ -336,7 +333,7 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
                         },
                         child: Text(
                           _isEditing ? 'Save Changes' : 'Edit Profile',
-                          style: const TextStyle(color: Colors.white), // ✅ MODIFIED LINE
+                          style: const TextStyle(color: Colors.white),
                         ),
                       ),
                     ),
@@ -354,12 +351,11 @@ class SessionHistoryPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFEFE9FF),
+      backgroundColor: const Color(0xFFF5F8FF),
       appBar: AppBar(
-        backgroundColor: Colors.deepPurple,
+        backgroundColor: kPrimary,
         iconTheme: const IconThemeData(color: Colors.white),
-        title:
-            const Text('Session History', style: TextStyle(color: Colors.white)),
+        title: const Text('Session History', style: TextStyle(color: Colors.white)),
       ),
       body: const Center(
         child: Text(
@@ -374,78 +370,314 @@ class SessionHistoryPage extends StatelessWidget {
 class PaymentHistoryPage extends StatelessWidget {
   const PaymentHistoryPage({super.key});
 
+  // Helper method to create unique key from title, subtitle, and price
+  String _createPlanKey(String title, String subtitle, double price) {
+    final key = '$title|$subtitle|${price.toStringAsFixed(2)}';
+    return key;
+  }
+
+  // Helper method to group payment data by plan title, subtitle, and price
+  Map<String, Map<String, dynamic>> _groupPaymentsByPlan(
+      List<QueryDocumentSnapshot> docs) {
+    final Map<String, Map<String, dynamic>> groupedData = {};
+
+    for (final doc in docs) {
+      final data = doc.data() as Map<String, dynamic>;
+
+      final title = data['planTitle'] ?? 'No Title';
+      final subtitle = data['planSubtitle'] ?? '';
+      final price = (data['price'] as num?)?.toDouble() ?? 0.0;
+      final purchaseDate = data['purchaseDate'] is Timestamp
+          ? (data['purchaseDate'] as Timestamp).toDate()
+          : DateTime.now();
+
+      final planKey = _createPlanKey(title, subtitle, price);
+
+      if (groupedData.containsKey(planKey)) {
+        groupedData[planKey]!['totalRevenue'] += price;
+        groupedData[planKey]!['count'] += 1;
+        if (purchaseDate.isAfter(groupedData[planKey]!['latestDate'])) {
+          groupedData[planKey]!['latestDate'] = purchaseDate;
+        }
+      } else {
+        groupedData[planKey] = {
+          'title': title,
+          'subtitle': subtitle,
+          'price': price,
+          'totalRevenue': price,
+          'count': 1,
+          'latestDate': purchaseDate,
+        };
+      }
+    }
+
+    return groupedData;
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFEFE9FF),
+      backgroundColor: const Color(0xFFF5F8FF),
       appBar: AppBar(
-        backgroundColor: Colors.deepPurple,
+        backgroundColor: kPrimary,
         iconTheme: const IconThemeData(color: Colors.white),
-        title: const Text('Payment History',
-            style: TextStyle(color: Colors.white)),
+        title: const Text('Payment History', style: TextStyle(color: Colors.white)),
       ),
       body: user == null
           ? const Center(child: Text('Not logged in'))
           : StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
-                  .collection('client_purchases')
-                  .orderBy('timestamp', descending: true)
+                  .collection('users')
+                  .doc(user.uid)
+                  .collection('purchased_plans')
+                  .orderBy('purchaseDate', descending: true)
                   .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                final docs = snapshot.data?.docs ?? [];
+                if (docs.isEmpty) {
                   return const Center(child: Text('No payment history found.'));
                 }
 
-                return ListView.builder(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  itemCount: snapshot.data!.docs.length,
-                  itemBuilder: (context, index) {
-                    final doc = snapshot.data!.docs[index];
+                final groupedPayments = _groupPaymentsByPlan(docs);
+                final groupedEntries = groupedPayments.entries.toList();
 
-                    final title = doc.data().toString().contains('planTitle')
-                        ? doc['planTitle']
-                        : 'No Title';
-                    final price = doc.data().toString().contains('price')
-                        ? doc['price'].toString()
-                        : '0';
-                    final status = doc.data().toString().contains('status')
-                        ? doc['status']
-                        : 'Paid';
-                    final timestamp =
-                        (doc.data().toString().contains('timestamp') &&
-                                doc['timestamp'] is Timestamp)
-                            ? (doc['timestamp'] as Timestamp).toDate()
-                            : null;
-                    final formattedDate = timestamp != null
-                        ? DateFormat('dd MMM yyyy').format(timestamp)
-                        : 'Unknown';
+                final totalRevenue = groupedPayments.values.fold<double>(
+                  0.0,
+                  (sum, group) => sum + group['totalRevenue'],
+                );
+                final totalPurchases = docs.length;
 
-                    return Padding(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                      child: Card(
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
-                        elevation: 2,
-                        child: ListTile(
-                          leading: const Icon(Icons.payments,
-                              color: Colors.deepPurple),
-                          title: Text(title),
-                          subtitle: Text('Date: $formattedDate\nStatus: $status'),
-                          trailing: Text('₹ $price',
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.green)),
-                        ),
+                return Column(
+                  children: [
+                    // Summary Card
+                    Container(
+                      margin: const EdgeInsets.all(16.0),
+                      padding: const EdgeInsets.all(20.0),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Colors.black12,
+                            blurRadius: 8,
+                            offset: Offset(0, 4),
+                          ),
+                        ],
                       ),
-                    );
-                  },
+                      child: Column(
+                        children: [
+                          const Text(
+                            'Payment Summary',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: kPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceAround,
+                            children: [
+                              Column(
+                                children: [
+                                  Text(
+                                    '$totalPurchases',
+                                    style: const TextStyle(
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.blue,
+                                    ),
+                                  ),
+                                  const Text('Total Purchases'),
+                                ],
+                              ),
+                              Column(
+                                children: [
+                                  Text(
+                                    '\$${totalRevenue.toStringAsFixed(2)}',
+                                    style: const TextStyle(
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.green,
+                                    ),
+                                  ),
+                                  const Text('Total Revenue'),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Plans List
+                    Expanded(
+                      child: ListView.builder(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        itemCount: groupedEntries.length,
+                        itemBuilder: (context, index) {
+                          final entry = groupedEntries[index];
+                          final groupData = entry.value;
+
+                          final title = groupData['title'];
+                          final subtitle = groupData['subtitle'];
+                          final price = groupData['price'];
+                          final totalRevenue = groupData['totalRevenue'];
+                          final count = groupData['count'];
+                          final latestDate = groupData['latestDate'] as DateTime;
+                          final formattedDate =
+                              DateFormat('dd MMM yyyy').format(latestDate);
+
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 4),
+                            child: Card(
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                              elevation: 3,
+                              child: ExpansionTile(
+                                leading: Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: kPrimary.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Icon(
+                                    Icons.payments,
+                                    color: kPrimary,
+                                    size: 24,
+                                  ),
+                                ),
+                                title: Text(
+                                  title,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                                subtitle: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (subtitle.isNotEmpty)
+                                      Text(
+                                        subtitle,
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          color: Colors.grey,
+                                        ),
+                                      ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'Purchased $count time${count > 1 ? 's' : ''} • Latest: $formattedDate',
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                trailing: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green,
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Text(
+                                    '\$${totalRevenue.toStringAsFixed(2)}',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ),
+                                children: [
+                                  Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey[50],
+                                      borderRadius: const BorderRadius.only(
+                                        bottomLeft: Radius.circular(12),
+                                        bottomRight: Radius.circular(12),
+                                      ),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        const Text(
+                                          'Revenue Details:',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            const Text('Individual Price:'),
+                                            Text(
+                                              '\$${price.toStringAsFixed(2)}',
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                color: kPrimary,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            const Text('Total Revenue:'),
+                                            Text(
+                                              '\$${totalRevenue.toStringAsFixed(2)}',
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.green,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            const Text('Purchase Count:'),
+                                            Text(
+                                              '$count',
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.blue,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 );
               },
             ),

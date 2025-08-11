@@ -31,104 +31,126 @@ void _listenToBookedSlots() {
   if (user == null) return;
 
   _firestore
-      .collection('trainer_slots')
-      .where('booked_by', arrayContains: user.uid)
-      .snapshots()
-      .listen((snapshot) {
-    final now = DateTime.now();
-    List<Map<String, dynamic>> past = [];
-    List<Map<String, dynamic>> upcoming = [];
+  .collection('trainer_slots')
+  .where('booked_by', arrayContains: user.uid)
+  .snapshots()
+  .listen((snapshot) {
+    try {
+      final now = DateTime.now();
+      final past = <Map<String, dynamic>>[];
+      final upcoming = <Map<String, dynamic>>[];
 
-    for (var doc in snapshot.docs) {
-      final data = doc.data();
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
 
-     DateTime rawDate = DateTime.now();
-if (data['date'] is Timestamp) {
-  rawDate = (data['date'] as Timestamp).toDate().toLocal();
-}
+        // DATE
+        DateTime rawDate = DateTime.now();
+        if (data['date'] is Timestamp) {
+          rawDate = (data['date'] as Timestamp).toDate().toLocal();
+        }
 
-String timeStr = (data['time'] ?? '').split(' - ').first.trim();
-TimeOfDay? timeOfDay;
-try {
-  final parsed = DateFormat.jm().parseLoose(timeStr);
-  timeOfDay = TimeOfDay(hour: parsed.hour, minute: parsed.minute);
-} catch (e) {
-  timeOfDay = const TimeOfDay(hour: 0, minute: 0); // fallback
-}
+        // TIME (robust)
+        final timeRaw = (data['time'] ?? '').toString();
+        final startStr = timeRaw.contains(' - ')
+            ? timeRaw.split(' - ').first.trim()
+            : timeRaw.trim();
 
-final slotDateTime = DateTime(
-  rawDate.year,
-  rawDate.month,
-  rawDate.day,
-  timeOfDay.hour,
-  timeOfDay.minute,
-);
+        TimeOfDay timeOfDay;
+        try {
+          final parsed = DateFormat.jm().parseLoose(startStr);
+          timeOfDay = TimeOfDay(hour: parsed.hour, minute: parsed.minute);
+        } catch (_) {
+          // If time field is missing/bad, skip this doc instead of crashing
+          debugPrint('Skipped doc ${doc.id} due to invalid time: "$timeRaw"');
+          continue;
+        }
 
+        final slotDateTime = DateTime(
+          rawDate.year, rawDate.month, rawDate.day, timeOfDay.hour, timeOfDay.minute,
+        );
 
-      final slot = {
-        'id': doc.id,
-        'date': slotDateTime,
-        'time': data['time'] ?? '',
-        'trainer': data['trainer_name'] ?? 'Unknown Trainer',
-        'status': data['status'] ?? 'Confirmed',
-        'docRef': doc.reference,
-      };
+        final statusByUser = Map<String, dynamic>.from(data['status_by_user'] ?? {});
+        final perUserStatus = statusByUser[user.uid] as String?;
 
-      if (slotDateTime.isBefore(now)) {
-        past.add(slot);
-      } else {
-        upcoming.add(slot);
+        final slot = {
+          'id': doc.id,
+          'date': slotDateTime,
+          'time': timeRaw,
+          'trainer': data['trainer_name'] ?? 'Unknown Trainer',
+          'status': perUserStatus ?? (data['status'] ?? 'Confirmed'),
+          'docRef': doc.reference,
+        };
+
+        (slotDateTime.isBefore(now) ? past : upcoming).add(slot);
       }
-    }
 
-    setState(() {
-      _pastSlots = past;
-      _upcomingSlots = upcoming;
-      _isLoading = false;
-    });
+      setState(() {
+        _pastSlots = past;
+        _upcomingSlots = upcoming;
+        _isLoading = false;
+      });
+    } catch (e, st) {
+      debugPrint('MySchedule snapshot parse error: $e\n$st');
+      setState(() => _isLoading = false);
+    }
+  }, onError: (e, st) {
+    debugPrint('MySchedule stream error: $e\n$st');
+    setState(() => _isLoading = false);
   });
+
+  
 }
 
   
+Future<void> _cancelBooking(DocumentReference docRef) async {
+  final user = _auth.currentUser;
+  if (user == null) return;
 
-  Future<void> _cancelBooking(DocumentReference docRef) async {
-    final user = _auth.currentUser;
-    if (user == null) return;
+  try {
+    await _firestore.runTransaction((transaction) async {
+      final snap = await transaction.get(docRef);
+      if (!snap.exists) throw Exception('Slot not found');
 
-    try {
-      await _firestore.runTransaction((transaction) async {
-        final doc = await transaction.get(docRef);
-        if (!doc.exists) throw Exception('Slot not found');
+      final data = snap.data() as Map<String, dynamic>;
+      List bookedBy     = List.from(data['booked_by'] ?? []);
+      List bookedNames  = List.from(data['booked_names'] ?? []);
+      List bookedEmails = List.from(data['booked_emails'] ?? []);
 
-        List bookedBy = List.from(doc['booked_by'] ?? []);
-        List bookedNames = List.from(doc['booked_names'] ?? []);
-        List bookedEmails = List.from(doc['booked_emails'] ?? []);
+      // Find by uid, then remove name/email at the same index
+      final idx = bookedBy.indexOf(user.uid);
+      if (idx == -1) throw Exception('You do not have a booking in this slot');
 
-        final userDoc = await _firestore.collection('users').doc(user.uid).get();
-        final userEmail = userDoc['email'] ?? '';
-        final userName = userDoc['name'] ?? 'Client';
+      // Optionally fetch canonical name/email (if you want perfect consistency)
+      final userDoc = await _firestore.collection('users').doc(user.uid).get();
+      final userName = userDoc.data()?['name'] ?? 'Client';
+      final userEmail = userDoc.data()?['email'] ?? '';
 
-        bookedBy.remove(user.uid);
-        bookedNames.remove(userName);
-        bookedEmails.remove(userEmail);
+      bookedBy.removeAt(idx);
+      if (idx < bookedNames.length)  bookedNames.removeAt(idx);
+      if (idx < bookedEmails.length) bookedEmails.removeAt(idx);
 
-        transaction.update(docRef, {
-          'booked': bookedBy.length,
-          'booked_by': bookedBy,
-          'booked_names': bookedNames,
-          'booked_emails': bookedEmails,
-        });
+      transaction.update(docRef, {
+        'booked': bookedBy.length,
+        'booked_by': bookedBy,
+        'booked_names': bookedNames,
+        'booked_emails': bookedEmails,
+        'last_updated': FieldValue.serverTimestamp(),
+        // Per-user status (doesn't affect other attendees)
+        'status_by_user': { user.uid: 'Cancelled' },
       });
+    });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Booking cancelled successfully')),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to cancel: ${e.toString()}')),
-      );
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Booking cancelled successfully')),
+    );
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Failed to cancel: ${e.toString()}')),
+    );
   }
+}
+
+ 
 
   void _showCancelDialog(DocumentReference docRef) {
     showDialog(
