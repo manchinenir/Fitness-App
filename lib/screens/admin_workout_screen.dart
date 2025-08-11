@@ -10,7 +10,7 @@ class AdminWorkoutScreen extends StatefulWidget {
 
 class _AdminWorkoutScreenState extends State<AdminWorkoutScreen> with SingleTickerProviderStateMixin {
   // Color Scheme
-  final Color _primaryColor = const Color(0xFF6C5CE7); // Purple
+  final Color _primaryColor = const Color(0xFF1C2D5E); // Purple
   final Color _secondaryColor = const Color(0xFF00CEFF); // Cyan
   final Color _accentColor = const Color(0xFFFD79A8); // Pink
   final Color _successColor = const Color(0xFF00B894); // Green
