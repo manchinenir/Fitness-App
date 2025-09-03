@@ -19,7 +19,6 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
   final Set<String> _completedKeys = {};
   List<Map<String, dynamic>> _myActivePlans = [];
   String? _errorMessage;
-  final Map<String, bool> _expandedCategories = {};
 
   // Square payment configuration - updated IDs below
   static const String _squareApplicationId = 'sandbox-sq0idb-b_5NuSv1kYCZWkITbVqS4w';
@@ -458,73 +457,59 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
   }
 
   Widget _buildCategoryHeader(String category, int planCount) {
-    final isExpanded = _expandedCategories[category] ?? false;
     return Container(
       margin: const EdgeInsets.only(bottom: 8, top: 16),
       child: Card(
         elevation: 2,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: () {
-            setState(() {
-              _expandedCategories[category] = !isExpanded;
-            });
-          },
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              gradient: LinearGradient(
-                colors: [Colors.blueAccent.withOpacity(0.1), Colors.white],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            gradient: LinearGradient(
+              colors: [Colors.blueAccent.withOpacity(0.1), Colors.white],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
             ),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.blueAccent.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(
-                    Icons.fitness_center,
-                    color: Colors.blueAccent,
-                    size: 20,
-                  ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.blueAccent.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        category,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blueAccent,
-                        ),
-                      ),
-                      Text(
-                        '$planCount session plan${planCount != 1 ? 's' : ''} available',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Icon(
-                  isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                child: const Icon(
+                  Icons.fitness_center,
                   color: Colors.blueAccent,
-                  size: 28,
+                  size: 20,
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      category,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blueAccent,
+                      ),
+                    ),
+                    Text(
+                      '$planCount session plan${planCount != 1 ? 's' : ''} available',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -1081,16 +1066,13 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
                         children: groupedPlans.entries.map((entry) {
                           final category = entry.key;
                           final categoryPlans = entry.value;
-                          final isExpanded = _expandedCategories[category] ?? false;
                           return Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               _buildCategoryHeader(category, categoryPlans.length),
-                              if (isExpanded) ...[
-                                ...categoryPlans.map((plan) {
-                                  return _buildPlanCard(plan);
-                                }),
-                              ],
+                              ...categoryPlans.map((plan) {
+                                return _buildPlanCard(plan);
+                              }),
                             ],
                           );
                         }).toList(),
@@ -1318,6 +1300,7 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
                 subtitle: const Text('Secure payment via Square'),
                 trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                 onTap: _isProcessingPayment ? null : _startCardEntryFlow,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               ),
             ),
             if (_errorMessage != null) ...[
