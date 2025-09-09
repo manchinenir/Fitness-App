@@ -10,6 +10,8 @@ class PlansScreen extends StatefulWidget {
 }
 
 class _PlansScreenState extends State<PlansScreen> {
+
+
   final _formKey = GlobalKey<FormState>();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
@@ -22,11 +24,10 @@ class _PlansScreenState extends State<PlansScreen> {
   // Selected values for dropdowns
   String _selectedCategory = 'Semi Private Monthly Plans';
   String _selectedStatus = 'Active';
-  String _selectedFilterCategory = 'Semi Private Monthly Plans';
 
   // Current editing index (-1 means adding new plan)
   int _editingIndex = -1;
-  String? _editingDocId; // Store document ID for editing
+  String? _editingDocId;
 
   // Plans data - now populated from Firestore
   List<Map<String, dynamic>> _plans = [];
@@ -57,7 +58,6 @@ class _PlansScreenState extends State<PlansScreen> {
   // Load initial plans to Firestore (always overwrite)
   Future<void> _loadInitialPlans() async {
     try {
-      // Initial plans data
       List<Map<String, dynamic>> initialPlans = [
         {
           'name': '4 Sessions Monthly',
@@ -399,7 +399,6 @@ class _PlansScreenState extends State<PlansScreen> {
     );
   }
 
-  // Save plan to Firestore
   Future<void> _savePlan() async {
     try {
       final planData = {
@@ -413,12 +412,10 @@ class _PlansScreenState extends State<PlansScreen> {
       };
 
       if (_editingIndex == -1) {
-        // Add new plan
         planData['createdAt'] = FieldValue.serverTimestamp();
         await _firestore.collection('plans').add(planData);
         _showSnackBar('Plan added successfully!');
       } else {
-        // Update existing plan
         if (_editingDocId != null) {
           await _firestore.collection('plans').doc(_editingDocId).update(planData);
           _showSnackBar('Plan updated successfully!');
@@ -430,7 +427,6 @@ class _PlansScreenState extends State<PlansScreen> {
     }
   }
 
-  // Delete plan from Firestore
   Future<void> _deletePlan(int index) async {
     showDialog(
       context: context,
@@ -487,7 +483,6 @@ class _PlansScreenState extends State<PlansScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // Header section
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(16),
@@ -520,8 +515,6 @@ class _PlansScreenState extends State<PlansScreen> {
                 ],
               ),
             ),
-
-            // Add Plan Button
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: SizedBox(
@@ -538,56 +531,7 @@ class _PlansScreenState extends State<PlansScreen> {
                 ),
               ),
             ),
-
-            // Dynamic Category Filter
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: StreamBuilder<QuerySnapshot>(
-                stream: _firestore.collection('plans').snapshots(),
-                builder: (ctx, snap) {
-                  final all = snap.data?.docs.map((d) {
-                        final m = d.data()! as Map<String, dynamic>;
-                        m['docId'] = d.id;
-                        return m;
-                      }).toList() ??
-                      [];
-                  _plans = all;
-                  final cats = [
-                    'Semi Private Monthly Plans',
-                    'Semi Private Bi Weekly Plans',
-                    'Semi Private Day Pass',
-                    'Group Training or Class',
-                    'Strength & Agility Session (High School Athlete)',
-                    'Strength & Agility Session (Kids)',
-                    'Athletic Performance (Adult)',
-                  ];
-                  return DropdownButtonFormField<String>(
-                    value: _selectedFilterCategory,
-                    decoration: const InputDecoration(
-                      labelText: 'Category Filter',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.filter_list),
-                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    ),
-                    items: cats
-                        .map((c) => DropdownMenuItem(
-                              value: c,
-                              child: Text(c, overflow: TextOverflow.ellipsis),
-                            ))
-                        .toList(),
-                    onChanged: (v) => setState(() {
-                      _selectedFilterCategory = v!;
-                      _expandedPlanIndex = null;
-                    }),
-                    isExpanded: true,
-                  );
-                },
-              ),
-            ),
-
             const SizedBox(height: 8),
-
-            // Plans List
             Expanded(
               child: StreamBuilder<QuerySnapshot>(
                 stream: _firestore.collection('plans').snapshots(),
@@ -599,46 +543,55 @@ class _PlansScreenState extends State<PlansScreen> {
                     return const Center(child: CircularProgressIndicator());
                   }
                   final docs = snap.data!.docs;
-                  final visible = docs
-                      .map((d) {
-                        final m = d.data()! as Map<String, dynamic>;
-                        m['docId'] = d.id;
-                        return m;
-                      })
-                      .where((p) =>
-                          p['category'] == _selectedFilterCategory && p['status'] == 'Active')
-                      .toList();
+                  _plans = docs.map((d) {
+                    final m = d.data()! as Map<String, dynamic>;
+                    m['docId'] = d.id;
+                    return m;
+                  }).toList();
 
-                  late List<Map<String, dynamic>> ordered;
-                  if (_selectedFilterCategory == 'Semi Private Monthly Plans' ||
-                      _selectedFilterCategory == 'Semi Private Bi Weekly Plans') {
-                    final order = [4, 8, 12, 16];
-                    ordered = order
-                        .map((s) => visible.firstWhere((p) => p['sessions'] == s,
-                            orElse: () => <String, dynamic>{}))
-                        .where((p) => p.isNotEmpty)
+                  if (_plans.isEmpty) {
+                    return const Center(child: Text('No plans available'));
+                  }
+
+                  // Sort monthly and bi-weekly plans by session count
+                  List<Map<String, dynamic>> sorted = [];
+                  final monthlyCats = [
+                    'Semi Private Monthly Plans',
+                    'Semi Private Bi Weekly Plans'
+                  ];
+                  final order = [4, 8, 12, 16];
+
+                  for (var cat in monthlyCats) {
+                    final group = _plans
+                        .where((p) =>
+                            p['category'] == cat && p['status'] == 'Active')
                         .toList();
-                  } else {
-                    ordered = visible;
+                    for (var s in order) {
+                      final found =
+                          group.where((p) => p['sessions'] == s).toList();
+                      if (found.isNotEmpty) sorted.add(found.first);
+                    }
                   }
-
-                  if (ordered.isEmpty) {
-                    return Center(child: Text('No $_selectedFilterCategory available'));
-                  }
+                  // Add the rest
+                  sorted.addAll(_plans.where((p) =>
+                      !monthlyCats.contains(p['category']) &&
+                      p['status'] == 'Active'));
 
                   return ListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: ordered.length,
+                    itemCount: sorted.length,
                     itemBuilder: (c, i) {
-                      final plan = ordered[i];
+                      final plan = sorted[i];
                       final expanded = _expandedPlanIndex == i;
                       return Container(
                         width: double.infinity,
                         margin: const EdgeInsets.only(bottom: 12),
                         child: Card(
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
                           child: InkWell(
-                            onTap: () => setState(() => _expandedPlanIndex = expanded ? null : i),
+                            onTap: () => setState(
+                                () => _expandedPlanIndex = expanded ? null : i),
                             child: Padding(
                               padding: const EdgeInsets.all(12),
                               child: Column(
@@ -649,26 +602,48 @@ class _PlansScreenState extends State<PlansScreen> {
                                       Expanded(
                                         flex: 3,
                                         child: Text(
-                                          '${plan['sessions']} sessions a month',
-                                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                          plan['category'],
+                                          style: const TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.bold),
                                           overflow: TextOverflow.ellipsis,
                                           maxLines: 1,
                                         ),
                                       ),
-                                      const SizedBox(width: 8),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          '${plan['sessions']} session(s)',
+                                          style: const TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w500),
+                                        ),
+                                      ),
                                       Text(
                                         '\$${(plan['price'] as num).toStringAsFixed(2)}',
-                                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.green),
+                                        style: const TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.green),
                                       ),
                                       const SizedBox(width: 4),
-                                      Icon(expanded ? Icons.expand_less : Icons.expand_more, size: 20),
+                                      Icon(
+                                          expanded
+                                              ? Icons.expand_less
+                                              : Icons.expand_more,
+                                          size: 20),
                                     ],
                                   ),
                                   if (expanded) ...[
                                     const SizedBox(height: 8),
                                     Text(
                                       plan['description'] ?? '',
-                                      style: const TextStyle(color: Colors.grey),
+                                      style:
+                                          const TextStyle(color: Colors.grey),
                                     ),
                                     const SizedBox(height: 8),
                                     Row(
@@ -676,21 +651,25 @@ class _PlansScreenState extends State<PlansScreen> {
                                       children: [
                                         TextButton.icon(
                                           onPressed: () {
-                                            final idx = _plans.indexWhere((p) => p['docId'] == plan['docId']);
+                                            final idx = _plans.indexWhere(
+                                                (p) => p['docId'] == plan['docId']);
                                             _showAddEditDialog(index: idx);
                                           },
-                                          icon: const Icon(Icons.edit, size: 18),
+                                          icon:
+                                              const Icon(Icons.edit, size: 18),
                                           label: const Text('Edit'),
                                         ),
                                         const SizedBox(width: 4),
                                         TextButton.icon(
                                           onPressed: () {
-                                            final idx = _plans.indexWhere((p) => p['docId'] == plan['docId']);
+                                            final idx = _plans.indexWhere(
+                                                (p) => p['docId'] == plan['docId']);
                                             _deletePlan(idx);
                                           },
                                           icon: const Icon(Icons.delete, size: 18),
                                           label: const Text('Delete'),
-                                          style: TextButton.styleFrom(foregroundColor: Colors.red),
+                                          style: TextButton.styleFrom(
+                                              foregroundColor: Colors.red),
                                         ),
                                       ],
                                     ),

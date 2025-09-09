@@ -6,7 +6,6 @@ version: 1.0.0+1
 environment:
   sdk: ">=3.0.0 <4.0.0"
 
-
 dependencies:
   flutter:
     sdk: flutter
@@ -17,28 +16,23 @@ dependencies:
   cloud_functions: ^5.5.1
   image_picker: ^1.0.4
   file_picker: ^10.2.0       # ✅ Fixed version to avoid platform plugin issues
-  url_launcher: ^6.2.5 
-
+  url_launcher: ^6.2.5
+  share_plus: ^7.2.1         # Added to resolve the package error
   firebase_storage: ^12.4.6
- 
   csv: ^5.0.1
-
   path_provider: ^2.0.11
- 
-
   # Firebase core packages
   firebase_core: ^3.13.1
   firebase_auth: ^5.5.4
   cloud_firestore: ^5.6.8
-
   # Local storage
   shared_preferences: ^2.2.2
-
   # Utility & UI
   provider: ^6.1.2
   fluttertoast: ^8.2.4
   uuid: ^4.2.2
   intl: ^0.19.0
+  rxdart: ^0.27.7            # Added for real-time stream handling
 
 dev_dependencies:
   flutter_test:
@@ -52,13 +46,12 @@ dev_dependencies:
   pdf: ^3.10.6
   printing: ^5.11.0
   open_file: ^3.3.2
-  
 
 flutter:
   uses-material-design: true
   assets:
     - assets/images/logo.webp
-    
+
 flutter_native_splash:
   color: "#1C2D5E"
   image: assets/splash_logo.png
@@ -66,9 +59,7 @@ flutter_native_splash:
   ios: true
   fullscreen: true
 
-
 flutter_icons:
   android: true
   ios: true
   image_path: "assets/icons/app_icon.png"
-  
