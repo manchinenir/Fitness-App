@@ -1,5 +1,8 @@
 {
   "projects": {
-    "default": "flex-facility-app-b55aa"
-  }
+    "default": "flex-facility-app-b55aa",
+    "stagingg": "flex-facility-app-b55aa"
+  },
+  "targets": {},
+  "etags": {}
 }

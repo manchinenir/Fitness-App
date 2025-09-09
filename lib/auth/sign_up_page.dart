@@ -5,159 +5,30 @@ import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 
 class SignupPage extends StatefulWidget {
-  const SignupPage({super.key});
+  final String? referralCode;
+  
+  const SignupPage({Key? key, this.referralCode}) : super(key: key);
 
   @override
   State<SignupPage> createState() => _SignupPageState();
 }
 
 class _SignupPageState extends State<SignupPage> {
-  final Color navyBlue = const Color(0xFF1C2D5E);
-
-  // For storing picked image file
-  File? _selectedImage;
-
   @override
   Widget build(BuildContext context) {
-    return _buildIntroPage(context);
-  }
-
-  /// First page with full screen image picker, image preview, skip for now, and sign-up button
-  Widget _buildIntroPage(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: Container(
-                width: double.infinity,
-                decoration: _selectedImage != null
-                    ? BoxDecoration(
-                        image: DecorationImage(
-                          image: FileImage(_selectedImage!),
-                          fit: BoxFit.cover,
-                        ),
-                      )
-                    : const BoxDecoration(
-                        image: DecorationImage(
-                          image: AssetImage("assets/images/signup.jpeg"),
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.only(left: 24, right: 24, bottom: 24, top: 8),
-              width: double.infinity,
-              child: Column(
-                children: [
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () async {
-                        final picker = ImagePicker();
-                        final picked = await picker.pickImage(
-                          source: ImageSource.gallery,
-                          imageQuality: 80,
-                        );
-                        if (picked != null) {
-                          setState(() {
-                            _selectedImage = File(picked.path);
-                          });
-                        }
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: navyBlue,
-                        side: BorderSide(color: navyBlue, width: 1.3),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        elevation: 0,
-                      ),
-                      icon: const Icon(Icons.image_outlined),
-                      label: Text(
-                        _selectedImage == null ? "Choose Image" : "Change Image",
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: navyBlue,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: TextButton(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const SignupFormPage(
-                              pickedImage: null,
-                            ),
-                          ),
-                        );
-                      },
-                      child: Text(
-                        "Skip for now",
-                        style: TextStyle(
-                          color: Colors.grey[700],
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => SignupFormPage(
-                              pickedImage: _selectedImage,
-                            ),
-                          ),
-                        );
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: navyBlue,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: const Text(
-                        "Sign Up",
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                          letterSpacing: 1,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
+    // Directly navigate to the signup form page
+    return SignupFormPage(
+      pickedImage: null,
+      referralCode: widget.referralCode,
     );
   }
 }
 
 class SignupFormPage extends StatefulWidget {
   final File? pickedImage;
+  final String? referralCode;
 
-  const SignupFormPage({super.key, this.pickedImage});
+  const SignupFormPage({Key? key, this.pickedImage, this.referralCode}) : super(key: key);
 
   @override
   State<SignupFormPage> createState() => _SignupFormPageState();
@@ -176,15 +47,30 @@ class _SignupFormPageState extends State<SignupFormPage> {
   final heightFeetController = TextEditingController();
   final heightInchesController = TextEditingController();
   final weightController = TextEditingController();
+  final referralCodeController = TextEditingController();
   
   String? selectedGender;
+  String? referrerId;
   
   bool isLoading = false;
   String? errorMessage;
+  bool referralCodeValid = false;
+  bool checkingReferralCode = false;
+  String referrerName = "";
 
   final Color navyBlue = const Color(0xFF1C2D5E);
 
-  // Function to calculate BMI
+  @override
+  void initState() {
+    super.initState();
+    
+    // Pre-fill referral code if provided in the URL
+    if (widget.referralCode != null) {
+      referralCodeController.text = widget.referralCode!;
+      _validateReferralCode(widget.referralCode!);
+    }
+  }
+
   // Function to calculate BMI (returns a double rounded to 2 decimals)
   double _calculateBMI() {
     final feet = double.tryParse(heightFeetController.text.replaceAll(',', '').trim()) ?? 0.0;
@@ -207,6 +93,103 @@ class _SignupFormPageState extends State<SignupFormPage> {
     return double.parse(bmi.toStringAsFixed(2));
   }
 
+  // Fixed referral code validation method
+  Future<void> _validateReferralCode(String code) async {
+    if (code.isEmpty) {
+      setState(() {
+        referralCodeValid = false;
+        referrerName = "";
+        checkingReferralCode = false;
+      });
+      return;
+    }
+
+    setState(() {
+      checkingReferralCode = true;
+    });
+
+    try {
+      final querySnapshot = await _firestore
+          .collection('users')
+          .where('referralCode', isEqualTo: code.trim().toUpperCase())
+          .limit(1)
+          .get();
+
+      if (querySnapshot.docs.isNotEmpty) {
+        final referrerData = querySnapshot.docs.first.data();
+        setState(() {
+          referralCodeValid = true;
+          referrerName = referrerData['name'] ?? "a friend";
+          referrerId = querySnapshot.docs.first.id;
+          checkingReferralCode = false;
+        });
+      } else {
+        setState(() {
+          referralCodeValid = false;
+          referrerName = "";
+          checkingReferralCode = false;
+        });
+      }
+    } catch (e) {
+      print('Error validating referral code: $e');
+      setState(() {
+        referralCodeValid = false;
+        referrerName = "";
+        checkingReferralCode = false;
+      });
+    }
+  }
+
+  // Generate a unique referral code for the new user
+  String _generateReferralCode(String uid) {
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final random = timestamp.toString().substring(8, 12);
+    return 'UITA$random'.toUpperCase();
+  }
+
+  // Process referral when a new user signs up with a valid code
+  Future<void> _processReferral(String newUserId, String newUserName) async {
+    if (!referralCodeValid || referralCodeController.text.isEmpty) return;
+
+    try {
+      // Find the referrer
+      final querySnapshot = await _firestore
+          .collection('users')
+          .where('referralCode', isEqualTo: referralCodeController.text.trim().toUpperCase())
+          .limit(1)
+          .get();
+
+      if (querySnapshot.docs.isNotEmpty) {
+        final referrerDoc = querySnapshot.docs.first;
+        final referrerId = referrerDoc.id;
+
+        // Create referral record
+        await _firestore.collection('referrals').add({
+          'referrerId': referrerId,
+          'referredUserId': newUserId,
+          'referredUserName': newUserName,
+          'referralCode': referralCodeController.text.trim().toUpperCase(),
+          'status': 'completed',
+          'joinedAt': FieldValue.serverTimestamp(),
+          'timestamp': FieldValue.serverTimestamp(),
+        });
+
+        // Update referrer's referral count
+        await _firestore.collection('users').doc(referrerId).update({
+          'referralCount': FieldValue.increment(1),
+          'successfulReferrals': FieldValue.arrayUnion([newUserId]),
+        });
+
+        // Show success message
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Referral applied successfully!')),
+        );
+      }
+    } catch (e) {
+      print('Error processing referral: $e');
+      // Don't block signup if referral processing fails
+    }
+  }
 
   Future<void> _signup() async {
     if (!_formKey.currentState!.validate()) return;
@@ -220,39 +203,62 @@ class _SignupFormPageState extends State<SignupFormPage> {
       final email = emailController.text.trim();
       final password = passwordController.text.trim();
 
+      // Check if email already exists
       final methods = await _auth.fetchSignInMethodsForEmail(email);
       if (methods.isNotEmpty) {
         throw Exception("The email address is already in use by another account.");
       }
 
-      final userCredential = await _auth.createUserWithEmailAndPassword(
+      // Create user with email and password
+      final UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
         email: email,
         password: password,
       );
 
-      await userCredential.user!.sendEmailVerification();
+      final User? user = userCredential.user;
+      if (user != null) {
+        // Generate a referral code for the new user
+        final String referralCode = _generateReferralCode(user.uid);
+        
+        // Calculate BMI
+        final bmi = _calculateBMI();
+        
+        // Prepare user data - using the OLD format for compatibility
+        final userData = {
+          'uid': user.uid,
+          'name': nameController.text.trim(),
+          'phone': phoneController.text.trim(),
+          'email': email,
+          'role': 'client', // Added role field from old code
+          'gender': selectedGender,
+          // Store height and weight in separate fields like the old code
+          'height_feet': heightFeetController.text.trim(),
+          'height_inches': heightInchesController.text.trim(),
+          'weight_lbs': weightController.text.trim(),
+          'bmi': bmi, // Store BMI like the old code
+          'referralCode': referralCode,
+          'created_at': FieldValue.serverTimestamp(),
+          'bookmarks': [],
+          'readAnnouncements': [],
+          'referralCount': 0,
+          'successfulReferrals': [],
+          // Track if this user was referred by someone
+          'referredBy': referralCodeValid ? referrerId : null,
+          'referralCodeUsed': referralCodeValid ? referralCodeController.text.trim().toUpperCase() : null,
+        };
 
-      // Calculate BMI
-      final bmi = _calculateBMI();
+        // Add user to Firestore
+        await _firestore.collection('users').doc(user.uid).set(userData);
 
-      // Store user data including BMI metrics
-      await _firestore.collection('users').doc(userCredential.user!.uid).set({
-        'name': nameController.text.trim(),
-        'phone': phoneController.text.trim(),
-        'email': email,
-        'role': 'client',
-        'gender': selectedGender,
-        'height_feet': heightFeetController.text.trim(),
-        'height_inches': heightInchesController.text.trim(),
-        'weight_lbs': weightController.text.trim(),
-        //'bmi': bmi.toStringAsFixed(1),
-        'bmi': bmi,
+        // Process referral if valid code was provided
+        if (referralCodeValid && referralCodeController.text.isNotEmpty) {
+          await _processReferral(user.uid, nameController.text.trim());
+        }
 
-        'created_at': FieldValue.serverTimestamp(),
-        // Optionally store image URL if you upload to Firebase Storage
-      });
+        // Send email verification
+        await user.sendEmailVerification();
 
-      if (mounted) {
+        // Show success message and navigate to login page
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Account created! Please verify your email.'),
@@ -261,9 +267,23 @@ class _SignupFormPageState extends State<SignupFormPage> {
           ),
         );
 
+        // Navigate to login page after successful signup
         await Future.delayed(const Duration(seconds: 2));
         Navigator.pushReplacementNamed(context, '/login');
       }
+    } on FirebaseAuthException catch (e) {
+      String message = 'An error occurred';
+      if (e.code == 'weak-password') {
+        message = 'The password provided is too weak.';
+      } else if (e.code == 'email-already-in-use') {
+        message = 'The account already exists for that email.';
+      } else if (e.code == 'invalid-email') {
+        message = 'The email address is not valid.';
+      }
+      
+      setState(() {
+        errorMessage = message;
+      });
     } catch (e) {
       final error = e.toString().replaceAll(RegExp(r'\[.*?\]'), '').replaceFirst('Exception: ', '').trim();
       setState(() {
@@ -279,7 +299,6 @@ class _SignupFormPageState extends State<SignupFormPage> {
     return _buildSignupForm(context);
   }
 
-  /// Second page with your original form
   Widget _buildSignupForm(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
@@ -364,6 +383,69 @@ class _SignupFormPageState extends State<SignupFormPage> {
                 validator: (val) =>
                     val != null && val.length >= 6 ? null : 'Password must be 6+ characters',
               ),
+              const SizedBox(height: 16),
+
+              // Referral Code Field (Optional)
+              TextFormField(
+                controller: referralCodeController,
+                decoration: InputDecoration(
+                  labelText: 'Referral Code (Optional)',
+                  labelStyle: TextStyle(color: Colors.grey[700]),
+                  prefixIcon: Icon(Icons.card_giftcard, color: navyBlue),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: navyBlue),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: navyBlue, width: 2),
+                  ),
+                  suffixIcon: referralCodeController.text.isNotEmpty
+                      ? checkingReferralCode
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Icon(
+                              referralCodeValid ? Icons.check_circle : Icons.error,
+                              color: referralCodeValid ? Colors.green : Colors.red,
+                            )
+                      : null,
+                ),
+                onChanged: (value) {
+                  if (value.isNotEmpty) {
+                    _validateReferralCode(value);
+                  } else {
+                    setState(() {
+                      referralCodeValid = false;
+                      referrerName = "";
+                    });
+                  }
+                },
+              ),
+              if (referralCodeValid && referrerName.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: Text(
+                    "Referred by $referrerName",
+                    style: TextStyle(
+                      color: Colors.green[700],
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              if (!referralCodeValid && referralCodeController.text.isNotEmpty && !checkingReferralCode)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: Text(
+                    "Invalid referral code",
+                    style: TextStyle(
+                      color: Colors.red[700],
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
               const SizedBox(height: 16),
 
               // Gender Selection
@@ -466,7 +548,7 @@ class _SignupFormPageState extends State<SignupFormPage> {
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: isLoading ? null : _signup,
-                  style: ElevatedButton.styleFrom(
+                    style: ElevatedButton.styleFrom(
                     backgroundColor: navyBlue,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
@@ -500,7 +582,7 @@ class _SignupFormPageState extends State<SignupFormPage> {
                   padding: const EdgeInsets.all(12),
                   margin: const EdgeInsets.only(bottom: 16),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFFE5E5), // light red
+                    color: const Color(0xFFFFE5E5),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: Colors.red.shade400),
                   ),

@@ -2,8 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:square_in_app_payments/in_app_payments.dart';
-import 'package:square_in_app_payments/models.dart' as square_models;
+import 'square_checkout.dart';
 
 class ClientPlansScreen extends StatefulWidget {
   const ClientPlansScreen({super.key});
@@ -20,24 +19,143 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
   List<Map<String, dynamic>> _myActivePlans = [];
   String? _errorMessage;
 
-  // Square payment configuration - updated IDs below
+  // Square payment configuration
   static const String _squareApplicationId = 'sandbox-sq0idb-b_5NuSv1kYCZWkITbVqS4w';
   static const String _squareLocationId = 'LPSE4AB75KF7G';
   bool _isProcessingPayment = false;
 
+  // Hardcoded plans with all specified categories
+  static final List<Map<String, dynamic>> _allPlans = [
+    // Semi Private Monthly Plans
+    {
+      'docId': 'sp_monthly_4',
+      'name': 'Semi Private Monthly (4 Sessions)',
+      'category': 'Semi Private Monthly Plans',
+      'sessions': 4,
+      'price': 185.0,
+      'description': '4 sessions per month',
+      'status': 'active',
+    },
+    {
+      'docId': 'sp_monthly_8',
+      'name': 'Semi Private Monthly (8 Sessions)',
+      'category': 'Semi Private Monthly Plans',
+      'sessions': 8,
+      'price': 375.0,
+      'description': '8 sessions per month',
+      'status': 'active',
+    },
+    {
+      'docId': 'sp_monthly_12',
+      'name': 'Semi Private Monthly (12 Sessions)',
+      'category': 'Semi Private Monthly Plans',
+      'sessions': 12,
+      'price': 500.0,
+      'description': '12 sessions per month',
+      'status': 'active',
+    },
+    {
+      'docId': 'sp_monthly_16',
+      'name': 'Semi Private Monthly (16 Sessions)',
+      'category': 'Semi Private Monthly Plans',
+      'sessions': 16,
+      'price': 600.0,
+      'description': '16 sessions per month',
+      'status': 'active',
+    },
+    // Semi Private Bi Weekly Plans
+    {
+      'docId': 'sp_biweekly_4',
+      'name': 'Semi Private Bi Weekly (4 Sessions)',
+      'category': 'Semi Private Bi Weekly Plans',
+      'sessions': 4,
+      'price': 94.0,
+      'description': '4 sessions per month',
+      'status': 'active',
+    },
+    {
+      'docId': 'sp_biweekly_8',
+      'name': 'Semi Private Bi Weekly (8 Sessions)',
+      'category': 'Semi Private Bi Weekly Plans',
+      'sessions': 8,
+      'price': 187.0,
+      'description': '8 sessions per month',
+      'status': 'active',
+    },
+    {
+      'docId': 'sp_biweekly_12',
+      'name': 'Semi Private Bi Weekly (12 Sessions)',
+      'category': 'Semi Private Bi Weekly Plans',
+      'sessions': 12,
+      'price': 260.0,
+      'description': '12 sessions per month',
+      'status': 'active',
+    },
+    {
+      'docId': 'sp_biweekly_16',
+      'name': 'Semi Private Bi Weekly (16 Sessions)',
+      'category': 'Semi Private Bi Weekly Plans',
+      'sessions': 16,
+      'price': 310.0,
+      'description': '16 sessions per month',
+      'status': 'active',
+    },
+    // Semi Private Day Pass
+    {
+      'docId': 'sp_day_pass',
+      'name': 'Semi Private Day Pass',
+      'category': 'Semi Private Day Pass',
+      'sessions': 1,
+      'price': 40.0,
+      'description': 'One-day access',
+      'status': 'active',
+    },
+    // Group Training or Class
+    {
+      'docId': 'group_training',
+      'name': 'Group Training or Class',
+      'category': 'Group Training or Class',
+      'sessions': 1,
+      'price': 25.0,
+      'description': 'Single group training session or class',
+      'status': 'active',
+    },
+    // Strength & Agility Session (High School Athlete)
+    {
+      'docId': 'strength_agility_hs',
+      'name': 'Strength & Agility (High School Athlete)',
+      'category': 'Strength & Agility Session (High School Athlete)',
+      'sessions': 1,
+      'price': 25.0,
+      'description': 'Strength and agility session for high school athletes',
+      'status': 'active',
+    },
+    // Strength & Agility Session (Kids)
+    {
+      'docId': 'strength_agility_kids',
+      'name': 'Strength & Agility (Kids)',
+      'category': 'Strength & Agility Session (Kids)',
+      'sessions': 1,
+      'price': 25.0,
+      'description': 'Strength and agility session for kids',
+      'status': 'active',
+    },
+    // Athletic Performance (Adult)
+    {
+      'docId': 'athletic_adult',
+      'name': 'Athletic Performance (Adult)',
+      'category': 'Athletic Performance (Adult)',
+      'sessions': 1,
+      'price': 25.0,
+      'description': 'Athletic performance session for adults',
+      'status': 'active',
+    },
+  ];
+
   @override
   void initState() {
     super.initState();
-    _initializeSquareSDK();
     _initializeData();
-  }
-
-  Future<void> _initializeSquareSDK() async {
-    try {
-      await InAppPayments.setSquareApplicationId(_squareApplicationId);
-    } catch (e) {
-      print('Error initializing Square SDK: $e');
-    }
   }
 
   Future<void> _initializeData() async {
@@ -136,84 +254,16 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
 
       final planId = plan['docId'] as String;
       final planName = plan['name'] as String;
-      final key = '${planName}_$planId'; 
+      final key = '${planName}_$planId';
       if (_purchasedKeys.contains(key)) {
         _showSnackBar('You currently have an active plan of this type. Complete all sessions first.', Colors.orange);
         return;
       }
-      
-      // Navigate to payment page first, then card entry
+
       _navigateToPaymentPage(plan);
     } catch (e) {
       print('Error initiating purchase: $e');
       _showSnackBar('Error initiating purchase: $e', Colors.red);
-    }
-  }
-
-  Future<void> _startSquareCardEntry(Map<String, dynamic> plan) async {
-    setState(() {
-      _isProcessingPayment = true;
-      _errorMessage = null;
-    });
-
-    try {
-      await InAppPayments.startCardEntryFlow(
-        onCardNonceRequestSuccess: (square_models.CardDetails cardDetails) async {
-          final nonce = cardDetails.nonce;
-          final planPrice = (plan['price'] ?? 0).toDouble();
-
-          // Process payment with nonce on backend
-          final paymentSuccess = await _processPaymentOnBackend(nonce, planPrice);
-
-          if (paymentSuccess) {
-            await _completePlanPurchaseAfterPayment(plan);
-            InAppPayments.completeCardEntry(onCardEntryComplete: () {
-              setState(() {
-                _isProcessingPayment = false;
-              });
-            });
-          } else {
-            InAppPayments.showCardNonceProcessingError('Payment failed. Please try again.');
-            setState(() {
-              _isProcessingPayment = false;
-            });
-          }
-        },
-        onCardEntryCancel: () {
-          setState(() {
-            _isProcessingPayment = false;
-          });
-        },
-      );
-    } catch (e) {
-      print('Error starting payment: $e');
-      setState(() {
-        _errorMessage = 'Error starting payment: $e';
-        _isProcessingPayment = false;
-      });
-    }
-  }
-
-  Future<bool> _processPaymentOnBackend(String nonce, double amount) async {
-    // TODO: Send nonce and amount to your backend for actual payment processing
-    // Simulate backend processing for now
-    await Future.delayed(const Duration(seconds: 2));
-    return true; // Return actual payment result from your backend
-  }
-
-  void _navigateToPaymentPage(Map<String, dynamic> plan) async {
-    final result = await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => SquarePaymentPage(
-          plan: plan,
-          squareApplicationId: _squareApplicationId,
-          squareLocationId: _squareLocationId,
-        ),
-      ),
-    );
-
-    if (result == true) {
-      await _completePlanPurchaseAfterPayment(plan);
     }
   }
 
@@ -300,8 +350,11 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
           'cancelledDate': FieldValue.serverTimestamp(),
         });
 
+        await Future.delayed(const Duration(milliseconds: 500));
+
         await _loadPurchasedPlans();
         await _loadMyActivePlans();
+        print('Plan "$planName" cancelled, refreshed purchased and active plans');
         _showSnackBar('Plan "$planName" cancelled successfully!', Colors.green);
       }
     } catch (e) {
@@ -315,9 +368,9 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
   Future<void> _useSession(String purchaseDocId, int currentRemaining, int totalSessions) async {
     try {
       final userId = _auth.currentUser?.uid;
-      if (userId == null) return; 
+      if (userId == null) return;
       final newRemaining = currentRemaining - 1;
-      final usedSessions = totalSessions - newRemaining; 
+      final usedSessions = totalSessions - newRemaining;
       if (newRemaining == 1) {
         _showLastSessionReminder(totalSessions);
       } else if (newRemaining == 0) {
@@ -333,6 +386,8 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
         'isActive': newRemaining > 0,
         'status': newRemaining > 0 ? 'active' : 'completed',
       });
+
+      await Future.delayed(const Duration(milliseconds: 500));
 
       await _loadPurchasedPlans();
       await _loadMyActivePlans();
@@ -376,6 +431,24 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), backgroundColor: color),
     );
+  }
+
+  void _navigateToPaymentPage(Map<String, dynamic> plan) async {
+    setState(() => _isProcessingPayment = true);
+    final result = await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SquarePaymentPage(
+          plan: plan,
+          squareApplicationId: _squareApplicationId,
+          squareLocationId: _squareLocationId,
+        ),
+      ),
+    );
+
+    if (result == true) {
+      await _completePlanPurchaseAfterPayment(plan);
+    }
+    setState(() => _isProcessingPayment = false);
   }
 
   void _showLastSessionReminder(int totalSessions) {
@@ -526,7 +599,7 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
     final status = (plan['status'] as String? ?? 'active').toLowerCase();
     final key = '${planName}_$planId';
     final isPurchased = _purchasedKeys.contains(key);
-    final isActive = status == 'active'; 
+    final isActive = status == 'active';
     String? purchaseDocId;
     if (isPurchased) {
       final purchase = _myActivePlans.firstWhere(
@@ -698,217 +771,6 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
     );
   }
 
-  Widget _buildMyPlanCard(Map<String, dynamic> purchase) {
-    final planName = purchase['planName'] as String? ?? 'Unknown Plan';
-    final planCategory = purchase['planCategory'] as String? ?? 'General';
-    final remainingSessions = purchase['remainingSessions'] as int? ?? 0;
-    final totalSessions = purchase['totalSessions'] as int? ?? 0;
-    final usedSessions = purchase['usedSessions'] as int? ?? 0;
-    final price = (purchase['price'] ?? 0).toDouble();
-    final isActive = purchase['isActive'] as bool? ?? false;
-    final purchaseDocId = purchase['docId'] as String? ?? '';
-    final progress =
-        totalSessions > 0 ? usedSessions / totalSessions : 0.0;
-    final planActive = isActive && remainingSessions > 0; 
-    return Card(
-      elevation: 4,
-      margin: const EdgeInsets.only(bottom: 16),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          gradient: LinearGradient(
-            colors: planActive
-                ? [Colors.green.withOpacity(0.1), Colors.white]
-                : [Colors.grey.withOpacity(0.1), Colors.white],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          planName,
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
-                            color: planActive ? Colors.green : Colors.grey,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          planCategory,
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: planActive
-                          ? Colors.green.withOpacity(0.1)
-                          : Colors.grey.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      planActive ? 'Active' : 'Completed',
-                      style: TextStyle(
-                        color: planActive ? Colors.green : Colors.grey,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Sessions Progress',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.grey[700],
-                        ),
-                      ),
-                      Text(
-                        '$usedSessions / $totalSessions used',
-                        style: const TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  LinearProgressIndicator(
-                    value: progress,
-                    backgroundColor: Colors.grey,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      planActive ? Colors.green : Colors.grey,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: planActive
-                          ? Colors.orange.withOpacity(0.1)
-                          : Colors.grey.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.fitness_center,
-                          size: 16,
-                          color: planActive ? Colors.orange : Colors.grey,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '$remainingSessions Left',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: planActive ? Colors.orange : Colors.grey,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.attach_money, size: 16, color: Colors.blue),
-                        Text(
-                          '\$${price.toStringAsFixed(2)}',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                            color: Colors.blue,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              if (planActive && remainingSessions > 0) ...[
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () => _useSession(
-                            purchaseDocId, remainingSessions, totalSessions),
-                        icon: const Icon(Icons.remove_circle_outline),
-                        label: const Text('Use Session'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orange,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () => _cancelPlan(purchaseDocId, planName),
-                        icon: const Icon(Icons.cancel),
-                        label: const Text('Cancel Plan'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildErrorWidget(String error) {
     return Center(
       child: Padding(
@@ -968,123 +830,67 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
                     ],
                   ),
                 )
-              : StreamBuilder<QuerySnapshot>(
-                  stream: _firestore.collection('plans').snapshots(),
-                  builder: (context, snapshot) {
-                    if (snapshot.hasError) {
-                      return _buildErrorWidget(
-                          'Error loading plans: ${snapshot.error}');
-                    }
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            CircularProgressIndicator(),
-                            SizedBox(height: 16),
-                            Text('Loading plans...'),
-                          ],
-                        ),
-                      );
-                    }
-                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                      return const Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.fitness_center,
-                                size: 80, color: Colors.grey),
-                            SizedBox(height: 16),
-                            Text(
-                              'No plans available',
-                              style: TextStyle(
-                                  fontSize: 18, color: Colors.grey),
-                            ),
-                            SizedBox(height: 8),
-                            Text(
-                              'Plans will appear here when available',
-                              style: TextStyle(color: Colors.grey),
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        ),
-                      );
-                    }
-                    final allPlans = snapshot.data!.docs.map((doc) {
-                      final data = doc.data()! as Map<String, dynamic>;
-                      data['docId'] = doc.id;
-                      return data;
-                    }).toList();
-                    final activePlans = allPlans.where((plan) {
-                      final status = (plan['status'] as String? ?? 'active').toLowerCase();
-                      return status == 'active';
-                    }).toList();
-                    if (activePlans.isEmpty) {
-                      return const Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.fitness_center,
-                                size: 80, color: Colors.grey),
-                            SizedBox(height: 16),
-                            Text(
-                              'No active plans available',
-                              style: TextStyle(
-                                  fontSize: 18, color: Colors.grey),
-                            ),
-                            SizedBox(height: 8),
-                            Text(
-                              'Active plans will appear here',
-                              style: TextStyle(color: Colors.grey),
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        ),
-                      );
-                    }
-                    final Map<String, List<Map<String, dynamic>>> groupedPlans = {};
-                    for (final plan in activePlans) {
-                      final category = plan['category'] as String? ?? 'General';
-                      if (!groupedPlans.containsKey(category)) {
-                        groupedPlans[category] = [];
-                      }
-                      groupedPlans[category]!.add(plan);
-                    }
-                    groupedPlans.forEach((category, plans) {
-                      plans.sort((a, b) {
-                        final sa = a['sessions'] as int? ?? 0;
-                        final sb = b['sessions'] as int? ?? 0;
-                        return sa.compareTo(sb);
-                      });
-                    });
-                    return RefreshIndicator(
-                      onRefresh: () async {
-                        await _loadPurchasedPlans();
-                      },
-                      child: ListView(
-                        padding: const EdgeInsets.all(16),
-                        children: groupedPlans.entries.map((entry) {
-                          final category = entry.key;
-                          final categoryPlans = entry.value;
+              : RefreshIndicator(
+                  onRefresh: () async {
+                    await _loadPurchasedPlans();
+                    await _loadMyActivePlans();
+                  },
+                  child: ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      // Group and sort plans
+                      ...(() {
+                        final Map<String, List<Map<String, dynamic>>> groupedPlans = {};
+                        for (final plan in _allPlans) {
+                          final category = plan['category'] as String;
+                          if (!groupedPlans.containsKey(category)) {
+                            groupedPlans[category] = [];
+                          }
+                          groupedPlans[category]!.add(plan);
+                        }
+                        groupedPlans.forEach((category, plans) {
+                          plans.sort((a, b) {
+                            final sa = a['sessions'] as int? ?? 0;
+                            final sb = b['sessions'] as int? ?? 0;
+                            return sa.compareTo(sb);
+                          });
+                        });
+                        // Define the desired category order
+                        const categoryOrder = [
+                          'Semi Private Monthly Plans',
+                          'Semi Private Bi Weekly Plans',
+                          'Semi Private Day Pass',
+                          'Group Training or Class',
+                          'Strength & Agility Session (High School Athlete)',
+                          'Strength & Agility Session (Kids)',
+                          'Athletic Performance (Adult)',
+                        ];
+                        // Sort categories based on the order
+                        final sortedCategories = groupedPlans.keys.toList()
+                          ..sort((a, b) {
+                            final indexA = categoryOrder.indexOf(a);
+                            final indexB = categoryOrder.indexOf(b);
+                            return indexA.compareTo(indexB);
+                          });
+                        return sortedCategories.map((category) {
+                          final categoryPlans = groupedPlans[category]!;
                           return Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               _buildCategoryHeader(category, categoryPlans.length),
-                              ...categoryPlans.map((plan) {
-                                return _buildPlanCard(plan);
-                              }),
+                              ...categoryPlans.map((plan) => _buildPlanCard(plan)),
                             ],
                           );
-                        }).toList(),
-                      ),
-                    );
-                  },
+                        }).toList();
+                      })(),
+                    ],
+                  ),
                 ),
     );
   }
 }
 
-// Square Payment Page
+// Square Payment Page (WebView-based)
 class SquarePaymentPage extends StatefulWidget {
   final Map<String, dynamic> plan;
   final String squareApplicationId;
@@ -1105,78 +911,50 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
   bool _isProcessingPayment = false;
   String? _errorMessage;
 
-  @override
-  void initState() {
-    super.initState();
-    _initializeSquareSDK();
-  }
+  static const String _apiUrl =
+      'https://us-central1-flex-facility-app-b55aa.cloudfunctions.net/api/process-payment';
 
-  Future<void> _initializeSquareSDK() async {
-    try {
-      await InAppPayments.setSquareApplicationId(widget.squareApplicationId);
-    } catch (e) {
-      setState(() {
-        _errorMessage = 'Error initializing payment system: $e';
-      });
-    }
-  }
-
-  void _startCardEntryFlow() async {
+  Future<void> _openWebCheckout() async {
     setState(() {
       _isProcessingPayment = true;
       _errorMessage = null;
     });
 
     try {
-      await InAppPayments.startCardEntryFlow(
-        onCardNonceRequestSuccess: (square_models.CardDetails result) {
-          _onCardEntryComplete(result);
-        },
-        onCardEntryCancel: () {
-          _onCardEntryCancel();
-        },
+      final double price = (widget.plan['price'] ?? 0).toDouble();
+      final int amountCents = (price * 100).round();
+
+      final result = await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => SquareWebCheckout(
+            amountCents: amountCents,
+            appId: widget.squareApplicationId,
+            locationId: widget.squareLocationId,
+            functionsBaseUrl: 'https://us-central1-flex-facility-app-b55aa.cloudfunctions.net/api',
+            production: false,
+          ),
+        ),
       );
-    } catch (e) {
-      setState(() {
-        _errorMessage = 'Error starting payment: $e';
-        _isProcessingPayment = false;
-      });
-    }
-  }
 
-  void _onCardEntryComplete(square_models.CardDetails cardDetails) async {
-    try {
-      final nonce = cardDetails.nonce;
-      final planPrice = (widget.plan['price'] ?? 0).toDouble();
+      if (!mounted) return;
 
-      final paymentSuccess = await _processPaymentOnBackend(nonce, planPrice);
-
-      if (paymentSuccess) {
+      if (result != null && result['ok'] == true) {
         Navigator.of(context).pop(true);
-      } else {
+      } else if (result != null) {
         setState(() {
-          _errorMessage = 'Payment failed. Please try again.';
+          _errorMessage = result['error']?.toString() ?? 'Payment failed';
           _isProcessingPayment = false;
         });
+      } else {
+        setState(() => _isProcessingPayment = false);
       }
     } catch (e) {
       setState(() {
-        _errorMessage = 'Error processing payment: $e';
+        _errorMessage = 'Error starting checkout: $e';
         _isProcessingPayment = false;
       });
     }
-  }
-
-  void _onCardEntryCancel() {
-    setState(() {
-      _isProcessingPayment = false;
-    });
-  }
-
-  Future<bool> _processPaymentOnBackend(String nonce, double amount) async {
-    // Simulate backend payment processing for demo
-    await Future.delayed(const Duration(seconds: 2));
-    return true;
   }
 
   @override
@@ -1189,10 +967,7 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
       appBar: AppBar(
         title: const Text(
           'Payment',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-          ),
+          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
         ),
         centerTitle: true,
         backgroundColor: const Color(0xFF1C2D5E),
@@ -1206,9 +981,7 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
           children: [
             Card(
               elevation: 4,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(20),
@@ -1229,41 +1002,19 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
                         SizedBox(width: 12),
                         Text(
                           'Plan Summary',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.blueAccent,
-                          ),
+                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blueAccent),
                         ),
                       ],
                     ),
                     const SizedBox(height: 16),
-                    Text(
-                      planName,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                    Text(planName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 8),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          '$sessions Sessions',
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                        Text(
-                          '\$${planPrice.toStringAsFixed(2)}',
-                          style: const TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.green,
-                          ),
-                        ),
+                        Text('$sessions Sessions', style: TextStyle(fontSize: 16, color: Colors.grey[600])),
+                        Text('\$${planPrice.toStringAsFixed(2)}',
+                            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.green)),
                       ],
                     ),
                   ],
@@ -1271,19 +1022,11 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
               ),
             ),
             const SizedBox(height: 24),
-            const Text(
-              'Payment Method',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+            const Text('Payment Method', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
             Card(
               elevation: 2,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               child: ListTile(
                 leading: Container(
                   padding: const EdgeInsets.all(8),
@@ -1293,13 +1036,10 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
                   ),
                   child: const Icon(Icons.credit_card, color: Colors.blue),
                 ),
-                title: const Text(
-                  'Credit/Debit Card',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
+                title: const Text('Credit/Debit Card', style: TextStyle(fontWeight: FontWeight.bold)),
                 subtitle: const Text('Secure payment via Square'),
                 trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                onTap: _isProcessingPayment ? null : _startCardEntryFlow,
+                onTap: _isProcessingPayment ? null : _openWebCheckout,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               ),
             ),
@@ -1317,12 +1057,7 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
                   children: [
                     const Icon(Icons.error, color: Colors.red),
                     const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        _errorMessage!,
-                        style: const TextStyle(color: Colors.red),
-                      ),
-                    ),
+                    Expanded(child: Text(_errorMessage!, style: const TextStyle(color: Colors.red))),
                   ],
                 ),
               ),
@@ -1341,13 +1076,7 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
                   children: [
                     CircularProgressIndicator(),
                     SizedBox(width: 16),
-                    Text(
-                      'Processing Payment...',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                    Text('Processing Payment...', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   ],
                 ),
               )
@@ -1355,21 +1084,16 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: _startCardEntryFlow,
+                  onPressed: _openWebCheckout,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blueAccent,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                   child: Text(
                     'Pay \$${planPrice.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                 ),
               ),
@@ -1380,13 +1104,7 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
                 children: [
                   Icon(Icons.security, size: 16, color: Colors.grey),
                   SizedBox(width: 4),
-                  Text(
-                    'Secured by Square',
-                    style: TextStyle(
-                      color: Colors.grey,
-                      fontSize: 12,
-                    ),
-                  ),
+                  Text('Secured by Square', style: TextStyle(color: Colors.grey, fontSize: 12)),
                 ],
               ),
             ),

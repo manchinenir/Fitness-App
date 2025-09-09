@@ -53,6 +53,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
 
   StreamSubscription<QuerySnapshot>? _sessionsSubscription;
   StreamSubscription<User?>? _authSubscription;
+  StreamSubscription<DocumentSnapshot>? _profileListener;
 
   @override
   void initState() {
@@ -62,11 +63,13 @@ class _ClientDashboardState extends State<ClientDashboard> {
       if (user != null) {
         _fetchUserProfile();
         _setupSessionsListener();
+        _setupProfileImageListener();
       }
     });
 
     _fetchUserProfile();
     _setupSessionsListener();
+    _setupProfileImageListener();
 
     FirebaseMessaging.onMessage.listen((message) {
       if (message.notification != null && mounted) {
@@ -85,7 +88,25 @@ class _ClientDashboardState extends State<ClientDashboard> {
   void dispose() {
     _sessionsSubscription?.cancel();
     _authSubscription?.cancel();
+    _profileListener?.cancel();
     super.dispose();
+  }
+
+  void _setupProfileImageListener() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      _profileListener = FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .snapshots()
+          .listen((snapshot) {
+        if (snapshot.exists && mounted) {
+          setState(() {
+            firestorePhotoUrl = snapshot.data()?['profileImage'];
+          });
+        }
+      });
+    }
   }
 
   void _setupSessionsListener() {
@@ -103,7 +124,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
       int completed = 0;
       List<Map<String, dynamic>> upcoming = [];
       for (final doc in snapshot.docs) {
-        final data = doc.data();
+        final data = doc.data() as Map<String, dynamic>;
         if (data['date'] is! Timestamp) continue;
         final date = (data['date'] as Timestamp).toDate().toLocal();
         final timeRange = data['time'] as String? ?? '';
@@ -143,7 +164,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
 
       final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
       final name = doc.data()?['name'] as String? ?? '';
-      final photoUrl = doc.data()?['photoUrl'] as String?;
+      final photoUrl = doc.data()?['profileImage'] as String?;
 
       setState(() {
         firstName = name.split(' ').first;
@@ -163,29 +184,32 @@ class _ClientDashboardState extends State<ClientDashboard> {
       final file = File(picked.path);
       setState(() => localImageFile = file);
 
-      await _uploadProfilePhoto(file);
+      await _uploadProfileImage(file);
       await _fetchUserProfile();
     }
   }
 
-  Future<void> _uploadProfilePhoto(File file) async {
+  Future<void> _uploadProfileImage(File file) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) throw 'Not authenticated';
 
       final storageRef = FirebaseStorage.instance
           .ref()
-          .child('user_photos')
+          .child('profile_images')
           .child('${user.uid}.jpg');
 
       await storageRef.putFile(file);
 
       final url = await storageRef.getDownloadURL();
 
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).update({'photoUrl': url});
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).update({'profileImage': url});
     } catch (e) {
-      // Optional: display error or log
-      debugPrint('Photo upload error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to upload image: $e')),
+        );
+      }
     }
   }
 
@@ -196,10 +220,10 @@ class _ClientDashboardState extends State<ClientDashboard> {
     ImageProvider<Object>? avatarImage;
     if (localImageFile != null) {
       avatarImage = FileImage(localImageFile!);
-    } else if (firestorePhotoUrl != null) {
+    } else if (firestorePhotoUrl != null && firestorePhotoUrl!.isNotEmpty) {
       avatarImage = NetworkImage(firestorePhotoUrl!);
     } else {
-      avatarImage = null;
+      avatarImage = const AssetImage('assets/profile.jpg');
     }
 
     if (isLoading) {
@@ -270,6 +294,12 @@ class _ClientDashboardState extends State<ClientDashboard> {
                                 radius: 36,
                                 backgroundColor: Colors.white24,
                                 backgroundImage: avatarImage,
+                                onBackgroundImageError: (exception, stackTrace) {
+                                  // Fallback to default image if network image fails to load
+                                  setState(() {
+                                    firestorePhotoUrl = null;
+                                  });
+                                },
                               ),
                               Positioned(
                                 bottom: 0,
@@ -346,13 +376,50 @@ class _ClientDashboardState extends State<ClientDashboard> {
                         child: StreamBuilder<QuerySnapshot>(
                           stream: FirebaseFirestore.instance
                               .collection('client_purchases')
-                              .where(
-                                'userId',
-                                isEqualTo: FirebaseAuth.instance.currentUser!.uid,
-                              )
+                              .where('userId', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
+                              .where('isActive', isEqualTo: true)
                               .snapshots(),
                           builder: (context, snap) {
-                            final count = snap.hasData ? snap.data!.docs.length : 0;
+                            if (snap.hasError) {
+                              return const Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.error, color: Colors.white70, size: 20),
+                                  Text('Error', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                                ],
+                              );
+                            }
+                            
+                            if (!snap.hasData) {
+                              return const Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white70),
+                                    ),
+                                  ),
+                                  SizedBox(height: 4),
+                                  Text('Loading...', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                                ],
+                              );
+                            }
+
+                            // Filter active plans with remaining sessions > 0
+                            final activePlans = snap.data!.docs.where((doc) {
+                              final data = doc.data() as Map<String, dynamic>;
+                              final isActive = data['isActive'] as bool? ?? false;
+                              final remainingSessions = data['remainingSessions'] as int? ?? 0;
+                              final status = (data['status'] as String? ?? 'active').toLowerCase();
+                              
+                              return isActive && remainingSessions > 0 && status != 'cancelled';
+                            }).toList();
+
+                            final count = activePlans.length;
+                            
                             return Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
@@ -456,7 +523,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
               sliver: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
                 stream: FirebaseFirestore.instance
                     .collection('users')
-                    .doc(FirebaseAuth.instance.currentUser!.uid)
+                    .doc(FirebaseAuth.instance.currentUser?.uid)
                     .snapshots(),
                 builder: (context, snap) {
                   final hasNew = snap.hasData && snap.data!.data()?['hasNewWorkout'] == true;

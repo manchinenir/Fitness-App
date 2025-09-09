@@ -31,7 +31,7 @@ android {
 
         // ✅ Kotlin DSL: use property, not function
         // Prefer Flutter’s configured min/target if present. Many FlutterFire libs need 23+.
-        minSdk = maxOf(23, flutter.minSdkVersion)
+        minSdk = maxOf(24, flutter.minSdkVersion)
         targetSdk = flutter.targetSdkVersion // or set a number like 34
 
         versionCode = 1
@@ -39,7 +39,7 @@ android {
     }
   buildTypes {
         release {
-            // Using debug signing so `flutter run --release` works until you add a release keystore
+            // Using debug signing so flutter run --release works until you add a release keystore
             signingConfig = signingConfigs.getByName("debug")
             // example if you enable shrinking later:
             // isMinifyEnabled = true
