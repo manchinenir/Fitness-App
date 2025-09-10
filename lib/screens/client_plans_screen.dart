@@ -3,6 +3,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'square_checkout.dart';
+import 'invoice_review_page.dart'; // adjust the path if needed
 
 class ClientPlansScreen extends StatefulWidget {
   const ClientPlansScreen({super.key});
@@ -956,6 +957,25 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
       });
     }
   }
+Future<void> _openInvoicePage() async {
+  final result = await Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => InvoiceReviewPage(
+        plan: widget.plan,
+        squareApplicationId: widget.squareApplicationId,
+        squareLocationId: widget.squareLocationId,
+        functionsBaseUrl: 'https://us-central1-flex-facility-app-b55aa.cloudfunctions.net/api',
+      ),
+    ),
+  );
+
+  if (!mounted) return;
+  if (result == true) {
+    // The invoice flow reported success → bubble it up
+    Navigator.of(context).pop(true);
+  }
+}
 
   @override
   Widget build(BuildContext context) {
@@ -1043,6 +1063,26 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
                 contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               ),
             ),
+
+            Card(
+  elevation: 2,
+  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+  child: ListTile(
+    leading: Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.blue.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: const Icon(Icons.receipt_long, color: Colors.blue),
+    ),
+    title: const Text('Invoice', style: TextStyle(fontWeight: FontWeight.bold)),
+    subtitle: const Text('Open Square hosted invoice'),
+    trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+    onTap: _isProcessingPayment ? null : _openInvoicePage,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+  ),
+),
             if (_errorMessage != null) ...[
               const SizedBox(height: 16),
               Container(
