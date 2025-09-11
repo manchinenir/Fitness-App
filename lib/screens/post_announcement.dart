@@ -139,10 +139,10 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
   }
 
   Future<void> _shareReferralOld(String referralCode) async {
-    final String message = "Join me at Fitness Hub! 💪\n"
-      "Use my referral code: $userReferralCode\n"
-      "New members get a special discount, and I'll earn a free month too! 🎉";
-    final String referralLink = "https://play.google.com/store/apps/details?id=com.yourfitnessapp&referrer=referral_code%3D$userReferralCode";
+    final String message = "Join Fitness Hub! 💪\n"
+      "Use my referral code: $referralCode\n"
+      "New members get a special discount, and I'll earn a free month too! 🎉\n\n"
+      "Download the app here: https://play.google.com/store/apps/details?id=com.yourfitnessapp&referrer=referral_code%3D$referralCode";
     final String subject = "Fitness App Referral";
     await Share.share(message, subject: subject);
   }
@@ -242,13 +242,14 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
   }
 
   // Function to handle referral sharing with dynamic app links
+  // Function to handle referral sharing with dynamic app links
   Future<void> _shareReferral() async {
     if (userReferralCode == null) return;
     
-    final String message = "Join me at Fitness Hub! 💪\n"
+    final String message = "Join Fitness Hub! 💪\n"
       "Use my referral code: $userReferralCode\n"
-      "New members get a special discount, and I'll earn a free month too! 🎉";
-    final String referralLink = "https://play.google.com/store/apps/details?id=com.yourfitnessapp&referrer=referral_code%3D$userReferralCode";
+      "New members get a special discount, and I'll earn a free month too! 🎉\n\n"
+      "Download the app here: https://play.google.com/store/apps/details?id=com.yourfitnessapp&referrer=referral_code%3D$userReferralCode";
     final String subject = "Fitness App Referral";
     
     await Share.share(message, subject: subject);
@@ -271,20 +272,34 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
   Future<void> _shareViaPlatform(String platform) async {
     if (userReferralCode == null) return;
     
-    final String message = "Join me at Fitness Hub! 💪\n"
+    final String message = "Join Fitness Hub! 💪\n"
       "Use my referral code: $userReferralCode\n"
       "New members get a special discount, and I'll earn a free month too! 🎉";
     final String referralLink = "https://play.google.com/store/apps/details?id=com.yourfitnessapp&referrer=referral_code%3D$userReferralCode";
+    
     switch (platform) {
       case 'whatsapp':
-        await launchUrl(Uri.parse("whatsapp://send?text=${Uri.encodeComponent('$message\n$referralLink')}"));
+        final encodedMessage = Uri.encodeComponent('$message\n$referralLink');
+        final whatsappUrl = "whatsapp://send?text=$encodedMessage";
+        if (await canLaunchUrl(Uri.parse(whatsappUrl))) {
+          await launchUrl(Uri.parse(whatsappUrl));
+        } else {
+          // Fallback to regular share if WhatsApp is not installed
+          await Share.share('$message\n$referralLink', subject: "Fitness App Referral");
+        }
         break;
       case 'email':
         final String subject = "Fitness App Referral";
         final String body = "$message\n\n$referralLink";
         final String encodedSubject = Uri.encodeComponent(subject);
         final String encodedBody = Uri.encodeComponent(body);
-        await launchUrl(Uri.parse("mailto:?subject=$encodedSubject&body=$encodedBody"));
+        final emailUrl = "mailto:?subject=$encodedSubject&body=$encodedBody";
+        if (await canLaunchUrl(Uri.parse(emailUrl))) {
+          await launchUrl(Uri.parse(emailUrl));
+        } else {
+          // Fallback to regular share
+          await Share.share('$message\n$referralLink', subject: subject);
+        }
         break;
     }
   }
@@ -1528,507 +1543,532 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
             final isBookmarked = userBookmarks.contains(docId);
             final category = data['category'] ?? 'General';
 
-            final isNew = DateTime.now().difference(postTime).inHours <= 24;
+            final isNew = DateTime.now().difference(postTime).inHours <= 24 && 
+                        !readAnnouncements.contains(docId);
             final emoji = _getCategoryEmoji(category);
 
             final TextEditingController commentController = TextEditingController();
 
-            return Container(
-              margin: const EdgeInsets.only(bottom: 20),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                color: Colors.white,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.08),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Header section with gradient
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          const Color(0xFF1C2D5E).withOpacity(0.95),
-                          const Color(0xFF2D3F73),
-                        ],
-                      ),
-                      borderRadius: const BorderRadius.only(
-                        topLeft: Radius.circular(16),
-                        topRight: Radius.circular(16),
-                      ),
+            return GestureDetector(
+              onTap: () {
+                // Mark as read when user taps anywhere on the card
+                if (!readAnnouncements.contains(docId)) {
+                  _markAsRead(docId);
+                }
+              },
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 20),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  color: readAnnouncements.contains(docId) 
+                      ? Colors.grey[100]  // Light grey background for read announcements
+                      : Colors.white,     // White background for unread announcements
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.08),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
                     ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Category emoji badge
-                        Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.2),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Center(
-                            child: Text(
-                              emoji,
-                              style: const TextStyle(fontSize: 18),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Header section with gradient
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            const Color(0xFF1C2D5E).withOpacity(0.95),
+                            const Color(0xFF2D3F73),
+                          ],
+                        ),
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(16),
+                          topRight: Radius.circular(16),
+                        ),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Category emoji badge
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.2),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Center(
+                              child: Text(
+                                emoji,
+                                style: const TextStyle(fontSize: 18),
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // Title and unread indicator
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      data['title'] ?? 'No Title',
-                                      style: TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.w700,
-                                        color: Colors.white,
-                                        height: 1.3,
-                                      ),
-                                    ),
-                                  ),
-                                  if (!readAnnouncements.contains(docId))
-                                    Container(
-                                      width: 10,
-                                      height: 10,
-                                      decoration: const BoxDecoration(
-                                        color: Colors.amber,
-                                        shape: BoxShape.circle,
-                                      ),
-                                    ),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
-                              // Date and time
-                              Row(
-                                children: [
-                                  Icon(Icons.access_time, size: 14, color: Colors.white.withOpacity(0.7)),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    DateFormat('MMM dd, yyyy · hh:mm a').format(postTime),
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.white.withOpacity(0.8),
-                                    ),
-                                  ),
-                                  if (isNew) ...[
-                                    const SizedBox(width: 12),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: Colors.amber.withOpacity(0.9),
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      child: const Text(
-                                        'NEW',
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Title and new indicator
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        data['title'] ?? 'No Title',
                                         style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold,
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.w700,
                                           color: Colors.white,
+                                          height: 1.3,
                                         ),
                                       ),
                                     ),
+                                    if (isNew)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: Colors.amber,
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        child: const Text(
+                                          'NEW',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ),
                                   ],
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  
-                  // Message content
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Text(
-                      data['message'] ?? '',
-                      style: const TextStyle(
-                        fontSize: 15,
-                        height: 1.5,
-                        color: Colors.black87,
-                      ),
-                    ),
-                  ),
-                  
-                  // Category badge - Improved design
-                  Padding(
-                    padding: const EdgeInsets.only(left: 16, right: 16, bottom: 12),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1C2D5E).withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: const Color(0xFF1C2D5E).withOpacity(0.3),
-                          width: 1.5,
-                        ),
-                      ),
-                      child: Text(
-                        category.toUpperCase(),
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: const Color(0xFF1C2D5E),
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                    ),
-                  ),
-                  
-                  // Media attachments
-                  if (data['imageUrl'] != null && (data['imageUrl'] as String).isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 16, right: 16, bottom: 12),
-                      child: GestureDetector(
-                        onTap: () async {
-                          await showDialog(
-                            context: context,
-                            builder: (_) => Dialog(
-                              backgroundColor: Colors.transparent,
-                              insetPadding: const EdgeInsets.all(20),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(12),
-                                child: Image.network(
-                                  data['imageUrl'],
-                                  fit: BoxFit.contain,
                                 ),
-                              ),
-                            ),
-                          );
-                        },
-                        child: Hero(
-                          tag: 'image-$docId',
-                          child: Container(
-                            height: 200,
-                            width: double.infinity,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(12),
-                              image: DecorationImage(
-                                image: NetworkImage(data['imageUrl']),
-                                fit: BoxFit.cover,
-                              ),
-                            ),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(12),
-                                color: Colors.black.withOpacity(0.2),
-                              ),
-                              child: const Center(
-                                child: Icon(
-                                  Icons.zoom_in,
-                                  color: Colors.white,
-                                  size: 36,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  
-                  if (data['pdfUrl'] != null && (data['pdfUrl'] as String).isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 16, right: 16, bottom: 12),
-                      child: GestureDetector(
-                        onTap: () async {
-                          final pdfUrl = data['pdfUrl'];
-                          try {
-                            await launchUrl(Uri.parse(pdfUrl),
-                                mode: LaunchMode.externalApplication);
-                          } catch (e) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Could not open PDF: $e')),
-                            );
-                          }
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF5F7FF),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: const Color(0xFF1C2D5E).withOpacity(0.2),
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF1C2D5E).withOpacity(0.1),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(Icons.picture_as_pdf, color: Colors.red, size: 20),
-                              ),
-                              const SizedBox(width: 12),
-                              const Expanded(
-                                child: Text(
-                                  'View PDF Document',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 14,
-                                    color: Color(0xFF1C2D5E),
-                                  ),
-                                ),
-                              ),
-                              Icon(Icons.open_in_new, color: Colors.grey[600], size: 20),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  
-                  // Reactions section
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: ['👍', '❤', '🎉', '👏'].map((emoji) {
-                        final count = reactions.values.where((v) => v == emoji).length;
-                        final isSelected = currentReaction == emoji;
-                        return GestureDetector(
-                          onTap: () => _toggleReaction(docId, isSelected ? null : emoji),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: isSelected 
-                                  ? const Color(0xFF1C2D5E).withOpacity(0.1) 
-                                  : Colors.grey[100],
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: isSelected 
-                                    ? const Color(0xFF1C2D5E) 
-                                    : Colors.transparent,
-                                width: 1.5,
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(emoji, style: const TextStyle(fontSize: 16)),
-                                const SizedBox(width: 4),
-                                Text(
-                                  count > 0 ? count.toString() : '',
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: isSelected ? const Color(0xFF1C2D5E) : Colors.grey[700],
-                                  ),
+                                const SizedBox(height: 6),
+                                // Date and time
+                                Row(
+                                  children: [
+                                    Icon(Icons.access_time, size: 14, color: Colors.white.withOpacity(0.7)),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      DateFormat('MMM dd, yyyy · hh:mm a').format(postTime),
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.white.withOpacity(0.8),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),
                           ),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                  
-                  // Action buttons
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        // Bookmark button - FILLED STYLE
-                        ElevatedButton.icon(
-                          onPressed: () => _toggleBookmark(docId),
-                          icon: Icon(
-                            isBookmarked ? Icons.bookmark : Icons.bookmark_outline,
-                            color: Colors.white,
-                            size: 18,
-                          ),
-                          label: Text(
-                            isBookmarked ? 'Saved' : 'Save',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                              color: Colors.white,
-                            ),
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: isBookmarked ? Colors.green : const Color(0xFF1C2D5E),
-                            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                          ),
-                        ),
-                        
-                        // Share button - OUTLINED WITH BLACK BORDER
-                        // Share button - FILLED WITH BLACK BACKGROUND AND WHITE TEXT
-                        ElevatedButton.icon(
-                          onPressed: () {
-                            Share.share('${data['title']}\n\n${data['message'] ?? ''}');
-                          },
-                          icon: const Icon(Icons.share, size: 16, color: Colors.white),
-                          label: const Text(
-                            'Share',
-                            style: TextStyle(
-                              fontSize: 13, 
-                              fontWeight: FontWeight.w500,
-                              color: Colors.white,
-                            ),
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF1C2D5E),
-                            foregroundColor: Colors.white, // Text and icon color
-                            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  
-                  // Comments section
-                  if (comments.isNotEmpty)
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[50],
-                        borderRadius: const BorderRadius.only(
-                          bottomLeft: Radius.circular(16),
-                          bottomRight: Radius.circular(16),
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            "Comments",
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 15,
-                              color: Color(0xFF1C2D5E),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          ...comments.map((comment) {
-                            final commentTime = (comment['timestamp'] as Timestamp).toDate();
-                            return Container(
-                              margin: const EdgeInsets.only(bottom: 12),
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(12),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.05),
-                                    blurRadius: 4,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ],
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Text(
-                                        comment['username'] ?? 'Anonymous',
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 13,
-                                        ),
-                                      ),
-                                      const Spacer(),
-                                      Text(
-                                        DateFormat('MMM dd, yyyy').format(commentTime),
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          color: Colors.grey[600],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    comment['text'] ?? '', 
-                                    style: const TextStyle(fontSize: 14),
-                                  ),
-                                ],
-                              ),
-                            );
-                          }).toList(),
                         ],
                       ),
                     ),
-                  
-                  // Add comment section
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.grey[100],
-                      borderRadius: comments.isEmpty 
-                          ? const BorderRadius.only(
-                              bottomLeft: Radius.circular(16),
-                              bottomRight: Radius.circular(16),
-                            )
-                          : BorderRadius.circular(0),
+                    
+                    // Message content
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        data['message'] ?? '',
+                        style: const TextStyle(
+                          fontSize: 15,
+                          height: 1.5,
+                          color: Colors.black87,
+                        ),
+                      ),
                     ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: commentController,
-                            decoration: InputDecoration(
-                              hintText: 'Add a comment...',
-                              filled: true,
-                              fillColor: Colors.white,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(24),
-                                borderSide: BorderSide.none,
+                    
+                    // Category badge - Improved design
+                    Padding(
+                      padding: const EdgeInsets.only(left: 16, right: 16, bottom: 12),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1C2D5E).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: const Color(0xFF1C2D5E).withOpacity(0.3),
+                            width: 1.5,
+                          ),
+                        ),
+                        child: Text(
+                          category.toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: const Color(0xFF1C2D5E),
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                    ),
+                    
+                    // Media attachments
+                    if (data['imageUrl'] != null && (data['imageUrl'] as String).isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 16, right: 16, bottom: 12),
+                        child: GestureDetector(
+                          onTap: () async {
+                            await showDialog(
+                              context: context,
+                              builder: (_) => Dialog(
+                                backgroundColor: Colors.transparent,
+                                insetPadding: const EdgeInsets.all(20),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Image.network(
+                                    data['imageUrl'],
+                                    fit: BoxFit.contain,
+                                  ),
+                                ),
                               ),
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 12,
+                            );
+                          },
+                          child: Hero(
+                            tag: 'image-$docId',
+                            child: Container(
+                              height: 200,
+                              width: double.infinity,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(12),
+                                image: DecorationImage(
+                                  image: NetworkImage(data['imageUrl']),
+                                  fit: BoxFit.cover,
+                                ),
                               ),
-                              hintStyle: const TextStyle(fontSize: 14),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(12),
+                                  color: Colors.black.withOpacity(0.2),
+                                ),
+                                child: const Center(
+                                  child: Icon(
+                                    Icons.zoom_in,
+                                    color: Colors.white,
+                                    size: 36,
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        Container(
-                          decoration: const BoxDecoration(
-                            color: Color(0xFF1C2D5E),
-                            shape: BoxShape.circle,
-                          ),
-                          child: IconButton(
-                            icon: const Icon(Icons.send, color: Colors.white, size: 20),
-                            onPressed: () {
-                              if (commentController.text.trim().isNotEmpty) {
-                                _addComment(docId, commentController.text.trim());
-                                commentController.clear();
-                                FocusScope.of(context).unfocus();
-                              }
-                            },
+                      ),
+                    
+                    if (data['pdfUrl'] != null && (data['pdfUrl'] as String).isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 16, right: 16, bottom: 12),
+                        child: GestureDetector(
+                          onTap: () async {
+                            final pdfUrl = data['pdfUrl'];
+                            try {
+                              await launchUrl(Uri.parse(pdfUrl),
+                                  mode: LaunchMode.externalApplication);
+                            } catch (e) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Could not open PDF: $e')),
+                              );
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF5F7FF),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: const Color(0xFF1C2D5E).withOpacity(0.2),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF1C2D5E).withOpacity(0.1),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.picture_as_pdf, color: Colors.red, size: 20),
+                                ),
+                                const SizedBox(width: 12),
+                                const Expanded(
+                                  child: Text(
+                                    'View PDF Document',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 14,
+                                      color: Color(0xFF1C2D5E),
+                                    ),
+                                  ),
+                                ),
+                                Icon(Icons.open_in_new, color: Colors.grey[600], size: 20),
+                              ],
+                            ),
                           ),
                         ),
-                      ],
+                      ),
+                    
+                    // Reactions section
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: ['👍', '❤', '🎉', '👏'].map((emoji) {
+                          final count = reactions.values.where((v) => v == emoji).length;
+                          final isSelected = currentReaction == emoji;
+                          return GestureDetector(
+                            onTap: () {
+                              _toggleReaction(docId, isSelected ? null : emoji);
+                              // Mark as read when user reacts
+                              if (!readAnnouncements.contains(docId)) {
+                                _markAsRead(docId);
+                              }
+                            },
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: isSelected 
+                                    ? const Color(0xFF1C2D5E).withOpacity(0.1) 
+                                    : Colors.grey[100],
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: isSelected 
+                                      ? const Color(0xFF1C2D5E) 
+                                      : Colors.transparent,
+                                  width: 1.5,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(emoji, style: const TextStyle(fontSize: 16)),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    count > 0 ? count.toString() : '',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: isSelected ? const Color(0xFF1C2D5E) : Colors.grey[700],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
                     ),
-                  ),
-                ],
+                    
+                    // Action buttons
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          // Bookmark button - FILLED STYLE
+                          ElevatedButton.icon(
+                            onPressed: () {
+                              _toggleBookmark(docId);
+                              // Mark as read when user bookmarks
+                              if (!readAnnouncements.contains(docId)) {
+                                _markAsRead(docId);
+                              }
+                            },
+                            icon: Icon(
+                              isBookmarked ? Icons.bookmark : Icons.bookmark_outline,
+                              color: Colors.white,
+                              size: 18,
+                            ),
+                            label: Text(
+                              isBookmarked ? 'Saved' : 'Save',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: Colors.white,
+                              ),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: isBookmarked ? Colors.green : const Color(0xFF1C2D5E),
+                              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                            ),
+                          ),
+                          
+                          // Share button - FILLED WITH BLACK BACKGROUND AND WHITE TEXT
+                          ElevatedButton.icon(
+                            onPressed: () {
+                              Share.share('${data['title']}\n\n${data['message'] ?? ''}');
+                              // Mark as read when user shares
+                              if (!readAnnouncements.contains(docId)) {
+                                _markAsRead(docId);
+                              }
+                            },
+                            icon: const Icon(Icons.share, size: 16, color: Colors.white),
+                            label: const Text(
+                              'Share',
+                              style: TextStyle(
+                                fontSize: 13, 
+                                fontWeight: FontWeight.w500,
+                                color: Colors.white,
+                              ),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF1C2D5E),
+                              foregroundColor: Colors.white, // Text and icon color
+                              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    
+                    // Comments section
+                    if (comments.isNotEmpty)
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[50],
+                          borderRadius: const BorderRadius.only(
+                            bottomLeft: Radius.circular(16),
+                            bottomRight: Radius.circular(16),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              "Comments",
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 15,
+                                color: Color(0xFF1C2D5E),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            ...comments.map((comment) {
+                              final commentTime = (comment['timestamp'] as Timestamp).toDate();
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 12),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(12),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.05),
+                                      blurRadius: 4,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Text(
+                                          comment['username'] ?? 'Anonymous',
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                        const Spacer(),
+                                        Text(
+                                          DateFormat('MMM dd, yyyy').format(commentTime),
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: Colors.grey[600],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      comment['text'] ?? '', 
+                                      style: const TextStyle(fontSize: 14),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }).toList(),
+                          ],
+                        ),
+                      ),
+                    
+                    // Add comment section
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[100],
+                        borderRadius: comments.isEmpty 
+                            ? const BorderRadius.only(
+                                bottomLeft: Radius.circular(16),
+                                bottomRight: Radius.circular(16),
+                              )
+                            : BorderRadius.circular(0),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: commentController,
+                              decoration: InputDecoration(
+                                hintText: 'Add a comment...',
+                                filled: true,
+                                fillColor: Colors.white,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(24),
+                                  borderSide: BorderSide.none,
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
+                                hintStyle: const TextStyle(fontSize: 14),
+                              ),
+                              onTap: () {
+                                // Mark as read when user taps on comment field
+                                if (!readAnnouncements.contains(docId)) {
+                                  _markAsRead(docId);
+                                }
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            decoration: const BoxDecoration(
+                              color: Color(0xFF1C2D5E),
+                              shape: BoxShape.circle,
+                            ),
+                            child: IconButton(
+                              icon: const Icon(Icons.send, color: Colors.white, size: 20),
+                              onPressed: () {
+                                if (commentController.text.trim().isNotEmpty) {
+                                  _addComment(docId, commentController.text.trim());
+                                  commentController.clear();
+                                  FocusScope.of(context).unfocus();
+                                  // Mark as read when user comments
+                                  if (!readAnnouncements.contains(docId)) {
+                                    _markAsRead(docId);
+                                  }
+                                }
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             );
           },

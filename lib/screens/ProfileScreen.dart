@@ -218,18 +218,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 _buildOption(
                   context,
-                  icon: Icons.history,
-                  label: 'Session History',
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (context) => const SessionHistoryPage()),
-                    );
-                  },
-                ),
-                _buildOption(
-                  context,
                   icon: Icons.payment,
                   label: 'Payment History',
                   onTap: () {
@@ -977,29 +965,6 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
     );
   }
 }
-
-class SessionHistoryPage extends StatelessWidget {
-  const SessionHistoryPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF5F8FF),
-      appBar: AppBar(
-        backgroundColor: kPrimary,
-        iconTheme: const IconThemeData(color: Colors.white),
-        title: const Text('Session History', style: TextStyle(color: Colors.white)),
-      ),
-      body: const Center(
-        child: Text(
-          'Your session history will appear here.',
-          style: TextStyle(fontSize: 16),
-        ),
-      ),
-    );
-  }
-}
-
 
 class ProgressTrackingPage extends StatefulWidget {
   const ProgressTrackingPage({super.key});
