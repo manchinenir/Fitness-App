@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+ import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'admin_create_slots.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -12,7 +12,7 @@ import 'dart:io'; // Added for File handling
 import 'package:shared_preferences/shared_preferences.dart'; // Added for getting admin name
 import 'package:firebase_auth/firebase_auth.dart'; // Added for current user
 import 'Admin_Plan_Screen.dart';
-
+import 'dart:async';
 class AdminDashboard extends StatefulWidget {
   final String userName;
 
@@ -131,14 +131,57 @@ class _AdminDashboardState extends State<AdminDashboard> {
       print('Error picking image: $e');
     }
   }
+  Stream<int> _activeMembersStream() {
+    return _fs
+        .collection('client_purchases')
+        .where('status', isEqualTo: 'active')
+        .snapshots()
+        .asyncMap((purchasesSnap) async {
+          // Collect unique active userIds
+          final activeUserIds = <String>{};
+          for (var doc in purchasesSnap.docs) {
+            final userId = doc.data()['userId'] as String?;
+            if (userId != null) activeUserIds.add(userId);
+          }
+
+          // Only count unique users
+          return activeUserIds.length;
+        });
+  }
 
   Future<_ActiveData> _fetchActiveMembers() async {
-    final now = DateTime.now();
-    final active = (await _fs.collection('users')
-          .where('plan_end', isGreaterThanOrEqualTo: Timestamp.fromDate(now))
-          .get()).docs.length;
-    final total = (await _fs.collection('users').get()).docs.length;
-    return _ActiveData(active: active, total: total);
+    try {
+      // Fetch all client purchases where status is active
+      final purchasesSnap = await _fs
+          .collection('client_purchases')
+          .where('status', isEqualTo: 'active')
+          .get();
+
+      // Extract unique userIds from active purchases
+      final activeUserIds = <String>{};
+      for (var doc in purchasesSnap.docs) {
+        final userId = doc.data()['userId'] as String?;
+        if (userId != null) {
+          activeUserIds.add(userId);
+        }
+      }
+
+      // Active members = number of unique users with at least one active plan
+      final activeMembers = activeUserIds.length;
+
+      // Total clients (for percentage calculation) = all users with role client
+      final usersSnap = await _fs
+          .collection('users')
+          .where('role', isEqualTo: 'client')
+          .get();
+
+      final totalClients = usersSnap.docs.length;
+
+      return _ActiveData(active: activeMembers, total: totalClients);
+    } catch (e) {
+      print('Error fetching active members: $e');
+      return _ActiveData(active: 0, total: 0);
+    }
   }
 
   Stream<int> _bookedThisWeekStream() {
@@ -284,8 +327,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 Row(
                   children: [
                     Expanded(
-                      child: FutureBuilder<_ActiveData>(
-                        future: _fetchActiveMembers(),
+                      child: StreamBuilder<int>(
+                        stream: _activeMembersStream(),
                         builder: (context, snap) {
                           if (!snap.hasData) {
                             return _buildPieChartCard(
@@ -296,18 +339,30 @@ class _AdminDashboardState extends State<AdminDashboard> {
                               color: Colors.blue,
                             );
                           }
-                          final d = snap.data!;
-                          final pct = d.total == 0 ? 0.0 : (d.active / d.total).clamp(0.0, 1.0);
-                          return _buildPieChartCard(
-                            title: 'Active Members',
-                            value: d.active.toString(),
-                            subtitle: 'Active',
-                            percentage: pct,
-                            color: Colors.blue,
+                          final activeCount = snap.data!;
+
+                          // For percentage calculation, fetch total clients
+                          return FutureBuilder<QuerySnapshot>(
+                            future: _fs.collection('users').where('role', isEqualTo: 'client').get(),
+                            builder: (context, usersSnap) {
+                              final totalClients = usersSnap.data?.docs.length ?? 0;
+                              final pct = totalClients == 0
+                                  ? 0.0
+                                  : (activeCount / totalClients).clamp(0.0, 1.0);
+
+                              return _buildPieChartCard(
+                                title: 'Active Members',
+                                value: activeCount.toString(),
+                                subtitle: 'Active',
+                                percentage: pct,
+                                color: Colors.blue,
+                              );
+                            },
                           );
                         },
                       ),
                     ),
+
                     const SizedBox(width: 16),
                     Expanded(
                       child: StreamBuilder<int>(

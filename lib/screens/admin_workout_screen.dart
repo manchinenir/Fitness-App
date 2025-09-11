@@ -56,7 +56,7 @@ class _AdminWorkoutScreenState extends State<AdminWorkoutScreen> with SingleTick
   
   // Custom workouts
   final List<String> _muscleGroups = [
-    'Back', 'Chest', 'Legs', 'Shoulder', 'Triceps', 'Biceps'
+    'Back', 'Chest', 'Legs', 'Shoulder', 'Triceps', 'Biceps', 'Arms', 'Glute', 'Full Body'
   ];
   final Map<String, IconData> _muscleGroupIcons = {
     'Back': Icons.accessibility_new,
@@ -64,24 +64,78 @@ class _AdminWorkoutScreenState extends State<AdminWorkoutScreen> with SingleTick
     'Legs': Icons.directions_run,
     'Shoulder': Icons.arrow_upward,
     'Triceps': Icons.open_with,
-    'Biceps': Icons.fitness_center
+    'Biceps': Icons.fitness_center,
+    'Arms': Icons.fitness_center,
+    'Glute': Icons.woman,
+    'Full Body': Icons.self_improvement
   };
   final Map<String, List<String>> _selectedCustomWorkouts = {};
   final Map<String, List<String>> _predefinedWorkouts = {
     'Back': [
       'Deadlift',
-      'Pull-Up',
+      'Pull Ups 3x10',
+      'Barbell Row 3x15,12,10 (135lb,185lb,205lb)',
+      'Dumbbell Row 3x12 (60lb,70lb,80lb)',
+      'Wide Grip Lat Pull Down 3x12 (120lb)', 
+      'Close Grip Lat Pull Down 3x12 (130lb)', 
+      'Seated Close Grip Cable Low Rows 3x20,15,12',
+      'Seated Wide Grip Cable Low Rows 3x20,15,12',
+      'Standing Single Arm Cable Low Row 3x12 (70lb,80lb,90lb)',
+      'Standing Cable Face Pulls 3x15 (90lb, 100lb, 110lb)',
+      'Hanging Knee Raises 3x15',
+      'Ez Bar Curls 3x12 (60lb)',
+      'Decline Sit Ups 3x15',
+      'Dumbbell Forward Lunge',
+      'Dumbbell Backwards Lunge',
+      'Barbell Forward Lunge',
+      'Barbell Reverse Lunge',
+      'Dumbbell Step Up',
+      'Dumbbell Sumo Squat',
+      'Barbell Sq',
+      'Goblet Squat',
+      'Barbell Step Up',
+      'Leg Press',
+      'Leg Extension',
+      'Leg Curl',
+      'Single Leg Extension',
+      'Single Leg Press',
+      'Single Leg Curl',
       'Bent Over Row',
       'Lat Pulldown',
       'Back Extension',
       'Single Arm Row'
     ],
     'Chest': [
+      'Push Ups',
+      'Decline Push Ups',
+      'Plyo Push Ups',
+      'Dumbbell Flys',
+      'Incline Dumbbell Flys',
+      'Decline Dumbbells Flys',
+      'Dumbbell Flat Press',
+      'Dumbbell Incline Press',
+      'Dumbbell Decline Press',
+      'Dumbbell Flat Hex Press',
+      'Dumbbell Incline Hex Press',
+      'Dumbbell Decline Hex Press',
+      'Barbell Flat Press',
+      'Barbell Incline Press',
+      'Seated Cable Flys',
+      'Standing Cable Flys',
+      'Seated Cable Press',
+      'Standing Cable Press',
       'Seated Fly Machine/Peck Deck 4x20',
       'Hammer Strength Incline Press 4x15',
       'Hammer Strength Decline 3x20',
       'Dumbbell Close Grip Press Flat Bench 3x15',
-      'Cable Cross Over 3x20'
+      'Cable Cross Over 3x20',
+      'Regular Push Up (3x15)',
+      'Decline Push Up - Feet Elevated (3x15)',
+      'Dumbbell Incline Chest Press (3x15,12,10) 30-40lb',
+      'Dumbbell Flat Chest Press (3x10)) 30-40lb',
+      'Dips (3x15)',
+      'Dumbbell Flat Chest Flys (3x15,12,10) 25-30lbs'
+
     ],
     'Legs': [
       'Leg Extensions 3x20',
@@ -90,12 +144,34 @@ class _AdminWorkoutScreenState extends State<AdminWorkoutScreen> with SingleTick
       'Barbell Squat 3x10',
       'Dumbbell RDLs 3x15'
     ],
+    'Arms': [  // Remove the trailing space
+    'Dumbbell Forward Lunge 3x10 (25lb)',
+    'Barbell Squat 3x10 (135lb)',
+    'Leg Extension 3x15 (100lb)',
+    'EZ Bar Curls 3x10 (60lb)',
+    'Rope Tricep Extension 3x15 (70lb)',
+    'Lying Leg Curl 3x12 (80lb)'
+   ],
+    'Glute': [
+      'Band is right above the knee on all movements',
+      'Banded Lateral Raise 3x15',
+      'Banded Straight Leg Kick Backs 3x15',
+      'Banded Fire Hydrants 3x15',
+      'Banded Donkey Kicks 3x15',
+      'Banded Squats 3x15',
+      'Lying Leg Raises 3x15',
+      '2) 30-45 sec planks'
+    ],
     'Shoulder': [
       'Standing DB Shoulder Press 3x12',
       'Overhead Press',
       'Lateral Raise',
       'Front Raise',
-      'Arnold Press'
+      'Arnold Press',
+      'Standing Dumbbell Shrug',
+      'Standing Dumbbell High Pull',
+      'Standing Dumbbell Front Raise',
+      'Standing Dumbbell Lateral Raise'
     ],
     'Triceps': [
       'Tricep Push Downs 3x20',
@@ -108,7 +184,16 @@ class _AdminWorkoutScreenState extends State<AdminWorkoutScreen> with SingleTick
       'Easy bar curls 3x15',
       'Cable Straight bar Curls 3x20',
       'Single Arm Dumbbell Preacher Curls 3x12 each arm',
-      'DB Hammer Curls 3x12'
+      'DB Hammer Curls 3x12',
+      'Alternating Front & Side Raises 3x12 each way'
+    ],
+    'Full Body': [
+      'Barbell Squat 3x12 (135-155lb)',
+      'Seated Shoulder Press 3x15 (40lb)',
+      'Pull Ups 3x10',
+      'Dumbbell Forward Lunge 3x10 (35lb)',
+      'Barbell Incline Bench Press 3x12 (115lb)',
+      'V Seat Russian Twist 3x15 each side'
     ]
   };
 
@@ -177,7 +262,7 @@ class _AdminWorkoutScreenState extends State<AdminWorkoutScreen> with SingleTick
 
     try {
       final assignedAt = Timestamp.now();
-      final trainerName = 'Kenny Sims'; // Replace with actual trainer
+      const trainerName = 'Kenny Sims'; // Replace with actual trainer
 
       final workoutData = {
         'assigned_at': assignedAt,
@@ -708,7 +793,7 @@ class ClientSelectionDialog extends StatefulWidget {
 
 class _ClientSelectionDialogState extends State<ClientSelectionDialog> {
   late Set<String> _selectedIds;
-  TextEditingController _searchController = TextEditingController();
+  final TextEditingController _searchController = TextEditingController();
   List<QueryDocumentSnapshot> _filteredClients = [];
 
   @override
