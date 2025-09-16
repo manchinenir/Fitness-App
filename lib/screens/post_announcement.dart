@@ -1408,6 +1408,8 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
   // Replace the existing _buildAnnouncementsTab() method with this updated version
 
   Widget _buildAnnouncementsTab() {
+    final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+    
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('announcements')  
@@ -1460,6 +1462,16 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
             return false;
           }
 
+          // Check audience restrictions - CRITICAL FIX
+          final audience = data['audience'] ?? 'All Users';
+          if (audience == 'Specific Clients') {
+            final targetClientIds = List<String>.from(data['targetClientIds'] ?? []);
+            // Only show if current user is in the target list
+            if (!targetClientIds.contains(currentUserId)) {
+              return false;
+            }
+          }
+
           // Filter by tab selection
           bool matchTab = true;
           if (_selectedTab == 2) { // Referrals tab
@@ -1480,6 +1492,7 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
 
           return matchTab && matchCategory && matchSearch && matchUnread;
         }).toList();
+
 
         filtered.sort((a, b) {
           final aData = a.data() as Map<String, dynamic>;

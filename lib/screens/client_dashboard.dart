@@ -22,6 +22,7 @@ class DashboardItem {
   final Widget? targetScreen;
   final VoidCallback? action;
   final bool showBadge;
+  final bool enabled; // Add this property
 
   DashboardItem({
     required this.icon,
@@ -30,6 +31,7 @@ class DashboardItem {
     this.targetScreen,
     this.action,
     this.showBadge = false,
+    this.enabled = true, // Default to enabled
   });
 }
 
@@ -54,6 +56,9 @@ class _ClientDashboardState extends State<ClientDashboard> {
   StreamSubscription<QuerySnapshot>? _sessionsSubscription;
   StreamSubscription<User?>? _authSubscription;
   StreamSubscription<DocumentSnapshot>? _profileListener;
+  
+  // Store tab disabled status
+  Map<String, bool> _tabDisabledStatus = {};
 
   @override
   void initState() {
@@ -64,12 +69,14 @@ class _ClientDashboardState extends State<ClientDashboard> {
         _fetchUserProfile();
         _setupSessionsListener();
         _setupProfileImageListener();
+        _loadTabDisabledStatus();
       }
     });
 
     _fetchUserProfile();
     _setupSessionsListener();
     _setupProfileImageListener();
+    _loadTabDisabledStatus();
 
     FirebaseMessaging.onMessage.listen((message) {
       if (message.notification != null && mounted) {
@@ -92,6 +99,31 @@ class _ClientDashboardState extends State<ClientDashboard> {
     super.dispose();
   }
 
+  Future<void> _loadTabDisabledStatus() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      if (doc.exists) {
+        final disabledTabs = List<String>.from(doc.data()?['disabledTabs'] ?? []);
+        
+        setState(() {
+          _tabDisabledStatus = {
+            'schedule': disabledTabs.contains('schedule'),
+            'booking': disabledTabs.contains('booking'),
+            'plans': disabledTabs.contains('plans'),
+            'workouts': disabledTabs.contains('workouts'),
+            'profile': disabledTabs.contains('profile'),
+            'announcements': disabledTabs.contains('announcements'),
+          };
+        });
+      }
+    } catch (e) {
+      print('Error loading tab disabled status: $e');
+    }
+  }
+
   void _setupProfileImageListener() {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
@@ -103,6 +135,19 @@ class _ClientDashboardState extends State<ClientDashboard> {
         if (snapshot.exists && mounted) {
           setState(() {
             firestorePhotoUrl = snapshot.data()?['profileImage'];
+          });
+          
+          // Also update tab disabled status when profile changes
+          final disabledTabs = List<String>.from(snapshot.data()?['disabledTabs'] ?? []);
+          setState(() {
+            _tabDisabledStatus = {
+              'schedule': disabledTabs.contains('schedule'),
+              'booking': disabledTabs.contains('booking'),
+              'plans': disabledTabs.contains('plans'),
+              'workouts': disabledTabs.contains('workouts'),
+              'profile': disabledTabs.contains('profile'),
+              'announcements': disabledTabs.contains('announcements'),
+            };
           });
         }
       });
@@ -171,6 +216,19 @@ class _ClientDashboardState extends State<ClientDashboard> {
         firestorePhotoUrl = photoUrl;
         localImageFile = null;
       });
+      
+      // Load tab disabled status
+      final disabledTabs = List<String>.from(doc.data()?['disabledTabs'] ?? []);
+      setState(() {
+        _tabDisabledStatus = {
+          'schedule': disabledTabs.contains('schedule'),
+          'booking': disabledTabs.contains('booking'),
+          'plans': disabledTabs.contains('plans'),
+          'workouts': disabledTabs.contains('workouts'),
+          'profile': disabledTabs.contains('profile'),
+          'announcements': disabledTabs.contains('announcements'),
+        };
+      });
     } catch (e) {
       setState(() => errorMessage = 'Error loading user: $e');
     } finally {
@@ -187,6 +245,10 @@ class _ClientDashboardState extends State<ClientDashboard> {
       await _uploadProfileImage(file);
       await _fetchUserProfile();
     }
+  }
+
+  Future<bool> _isTabDisabled(String tabKey) async {
+    return _tabDisabledStatus[tabKey] ?? false;
   }
 
   Future<void> _uploadProfileImage(File file) async {
@@ -527,30 +589,36 @@ class _ClientDashboardState extends State<ClientDashboard> {
                     .snapshots(),
                 builder: (context, snap) {
                   final hasNew = snap.hasData && snap.data!.data()?['hasNewWorkout'] == true;
+                  
+                  // Create dashboard items with proper enabled status
                   final items = [
                     DashboardItem(
                       icon: Icons.schedule,
                       label: 'My Schedule',
                       color: Colors.blue,
                       targetScreen: const MySchedulePage(),
+                      enabled: !(_tabDisabledStatus['schedule'] ?? false),
                     ),
                     DashboardItem(
                       icon: Icons.date_range,
                       label: 'Book Session',
                       color: Colors.purple,
                       targetScreen: const ClientBookSlot(),
+                      enabled: !(_tabDisabledStatus['booking'] ?? false),
                     ),
                     DashboardItem(
                       icon: FontAwesomeIcons.dollarSign,
                       label: 'Plans',
                       color: Colors.green,
                       targetScreen: const ClientPlansScreen(),
+                      enabled: !(_tabDisabledStatus['plans'] ?? false),
                     ),
                     DashboardItem(
                       icon: FontAwesomeIcons.dumbbell,
                       label: 'Workouts',
                       color: Colors.orange,
                       showBadge: hasNew,
+                      enabled: !(_tabDisabledStatus['workouts'] ?? false),
                       action: () async {
                         Navigator.pushNamed(context, '/clientWorkout');
                         await FirebaseFirestore.instance
@@ -564,14 +632,17 @@ class _ClientDashboardState extends State<ClientDashboard> {
                       label: 'Profile',
                       color: Colors.red,
                       targetScreen: const ProfileScreen(),
+                      enabled: !(_tabDisabledStatus['profile'] ?? false),
                     ),
                     DashboardItem(
                       icon: Icons.announcement,
                       label: 'Announcements',
                       color: Colors.teal,
                       targetScreen: const PostAnnouncementScreen(),
+                      enabled: !(_tabDisabledStatus['announcements'] ?? false),
                     ),
                   ];
+                  
                   return SliverGrid(
                     gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: 2,
@@ -632,13 +703,14 @@ class _ClientDashboardState extends State<ClientDashboard> {
 
   Widget _actionCard(DashboardItem item) {
     return Card(
-      elevation: 4,
+      elevation: item.enabled ? 4 : 1,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
       ),
+      color: item.enabled ? null : Colors.grey[200],
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: () {
+        onTap: item.enabled ? () {
           if (item.targetScreen != null) {
             Navigator.push(
               context,
@@ -647,58 +719,70 @@ class _ClientDashboardState extends State<ClientDashboard> {
           } else {
             item.action?.call();
           }
-        },
+        } : null,
         child: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
-            gradient: LinearGradient(
+            gradient: item.enabled ? LinearGradient(
               colors: [
                 item.color.withOpacity(0.15),
                 item.color.withOpacity(0.05),
               ],
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-            ),
+            ) : null,
           ),
-          child: Stack(
-            children: [
-              Positioned(
-                top: 8,
-                right: 8,
-                child: Icon(
-                  item.icon,
-                  size: 40,
-                  color: item.color.withOpacity(0.15),
+          child: Opacity(
+            opacity: item.enabled ? 1.0 : 0.5,
+            child: Stack(
+              children: [
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Icon(
+                    item.icon,
+                    size: 40,
+                    color: item.color.withOpacity(item.enabled ? 0.15 : 0.05),
+                  ),
                 ),
-              ),
-              Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(item.icon, color: item.color, size: 28),
-                  const SizedBox(height: 12),
-                  Text(
-                    item.label,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(item.icon, color: item.color, size: 28),
+                    const SizedBox(height: 12),
+                    Text(
+                      item.label,
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: item.enabled ? null : Colors.grey[600],
+                      ),
+                    ),
+                    if (!item.enabled) 
+                      const Text(
+                        'Disabled by admin',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey,
+                        ),
+                      ),
+                  ],
+                ),
+                if (item.showBadge && item.enabled)
+                  const Positioned(
+                    top: 8,
+                    left: 8,
+                    child: CircleAvatar(
+                      radius: 10,
+                      backgroundColor: Colors.red,
+                      child: Text('!',
+                          style: TextStyle(color: Colors.white, fontSize: 12)),
                     ),
                   ),
-                ],
-              ),
-              if (item.showBadge)
-                const Positioned(
-                  top: 8,
-                  left: 8,
-                  child: CircleAvatar(
-                    radius: 10,
-                    backgroundColor: Colors.red,
-                    child: Text('!',
-                        style: TextStyle(color: Colors.white, fontSize: 12)),
-                  ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

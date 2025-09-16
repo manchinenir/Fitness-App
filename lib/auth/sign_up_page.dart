@@ -225,27 +225,26 @@ class _SignupFormPageState extends State<SignupFormPage> {
         
         // Prepare user data - using the OLD format for compatibility
         final userData = {
-          'uid': user.uid,
-          'name': nameController.text.trim(),
-          'phone': phoneController.text.trim(),
-          'email': email,
-          'role': 'client', // Added role field from old code
-          'gender': selectedGender,
-          // Store height and weight in separate fields like the old code
-          'height_feet': heightFeetController.text.trim(),
-          'height_inches': heightInchesController.text.trim(),
-          'weight_lbs': weightController.text.trim(),
-          'bmi': bmi, // Store BMI like the old code
-          'referralCode': referralCode,
-          'created_at': FieldValue.serverTimestamp(),
-          'bookmarks': [],
-          'readAnnouncements': [],
-          'referralCount': 0,
-          'successfulReferrals': [],
-          // Track if this user was referred by someone
-          'referredBy': referralCodeValid ? referrerId : null,
-          'referralCodeUsed': referralCodeValid ? referralCodeController.text.trim().toUpperCase() : null,
-        };
+        'uid': user.uid,
+        'name': nameController.text.trim(),
+        'phone': phoneController.text.trim(),
+        'email': email,
+        'role': 'client',
+        'isActive': true,   // 👈 added here
+        'gender': selectedGender,
+        'height_feet': heightFeetController.text.trim(),
+        'height_inches': heightInchesController.text.trim(),
+        'weight_lbs': weightController.text.trim(),
+        'bmi': bmi,
+        'referralCode': referralCode,
+        'created_at': FieldValue.serverTimestamp(),
+        'bookmarks': [],
+        'readAnnouncements': [],
+        'referralCount': 0,
+        'successfulReferrals': [],
+        'referredBy': referralCodeValid ? referrerId : null,
+        'referralCodeUsed': referralCodeValid ? referralCodeController.text.trim().toUpperCase() : null,
+      };
 
         // Add user to Firestore
         await _firestore.collection('users').doc(user.uid).set(userData);

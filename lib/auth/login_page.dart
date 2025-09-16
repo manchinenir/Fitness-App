@@ -142,9 +142,17 @@ class _LoginPageState extends State<LoginPage> {
 
       final userDoc = await _firestore.collection('users').doc(userCredential.user!.uid).get();
       if (!userDoc.exists) throw Exception("User record not found");
+      
+      // Add this check for account activation status
+      final isActive = userDoc['isActive'] ?? true;
+      if (!isActive) {
+        await _auth.signOut();
+        throw Exception("Your account has been deactivated. Please contact support.");
+      }
 
-      final role = userDoc['role'];
+      final role = userDoc['role'] ?? 'client';
       _navigateBasedOnRole(role);
+
     } catch (e) {
       final msg = e.toString();
       if (e is FirebaseAuthException) {
@@ -153,6 +161,8 @@ class _LoginPageState extends State<LoginPage> {
         setState(() => errorMessage = 'Invalid email or password');
       } else if (msg.toLowerCase().contains('email not verified')) {
         setState(() => errorMessage = 'Please verify your email to continue.');
+      } else if (msg.toLowerCase().contains('deactivated')) {
+        setState(() => errorMessage = 'Your account has been deactivated. Please contact support.');
       } else {
         setState(() => errorMessage = 'Something went wrong. Please try again.');
       }
