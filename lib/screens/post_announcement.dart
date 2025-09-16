@@ -37,9 +37,12 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen>
   File? _selectedImage;
   File? _selectedPDF;
   bool _isLoading = false;
+  List<String> _selectedClientIds = [];
+  List<Map<String, dynamic>> _clients = [];
+  bool _isLoadingClients = false;
 
   final List<String> _categories = ['General', 'Birthday', 'Event', 'Important'];
-  final List<String> _audiences = ['All Users', 'Specific Group'];
+  final List<String> _audiences = ['All Users', 'Specific Clients'];
 
   String _trainerEmail = '';
   late TabController _tabController;
@@ -49,6 +52,7 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen>
     super.initState();
     _fetchTrainerInfo();
     _tabController = TabController(length: 3, vsync: this);
+    _loadClients();
 
     if (widget.editData != null && widget.editDocId != null) {
       _loadForEditing(widget.editData!, widget.editDocId!);
@@ -62,6 +66,31 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen>
     _messageController.dispose();
     _trainerNameController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadClients() async {
+    setState(() => _isLoadingClients = true);
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .where('role', isEqualTo: 'client')
+          .get();
+      
+      setState(() {
+        _clients = snapshot.docs.map((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          return {
+            'id': doc.id,
+            'name': data['name'] ?? 'Unknown',
+            'email': data['email'] ?? '',
+          };
+        }).toList();
+      });
+    } catch (e) {
+      print('Error loading clients: $e');
+    } finally {
+      setState(() => _isLoadingClients = false);
+    }
   }
 
   Future<void> _fetchTrainerInfo() async {
@@ -127,6 +156,14 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen>
       return;
     }
 
+    // Validate that at least one client is selected when audience is "Specific Clients"
+    if (_selectedAudience == 'Specific Clients' && _selectedClientIds.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select at least one client')),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -164,8 +201,9 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen>
         'pdfUrl': pdfUrl,
         'timestamp': FieldValue.serverTimestamp(),
         'trainerName': trainerName.isNotEmpty ? trainerName : _trainerEmail,
+        // This line ensures targetClientIds is saved correctly:
+        'targetClientIds': _selectedAudience == 'Specific Clients' ? _selectedClientIds : [],
       };
-
       if (docId != null) {
         await FirebaseFirestore.instance
             .collection('announcements')
@@ -191,6 +229,7 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen>
         _selectedPDF = null;
         _selectedCategory = 'General';
         _selectedAudience = 'All Users';
+        _selectedClientIds = [];
       });
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -207,6 +246,7 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen>
     _selectedCategory = data['category'] ?? 'General';
     _selectedAudience = data['audience'] ?? 'All Users';
     _trainerNameController.text = data['trainerName'] ?? '';
+    _selectedClientIds = List<String>.from(data['targetClientIds'] ?? []);
   }
 
   @override
@@ -348,6 +388,45 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen>
                     .toList(),
                 onChanged: (v) => setState(() => _selectedAudience = v!),
               ),
+              if (_selectedAudience == 'Specific Clients') ...[
+                const SizedBox(height: 16),
+                const Text('Select Clients',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                _isLoadingClients
+                    ? const CircularProgressIndicator()
+                    : Container(
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: ExpansionTile(
+                          title: Text(
+                            _selectedClientIds.isEmpty
+                                ? 'Select clients'
+                                : '${_selectedClientIds.length} client(s) selected',
+                          ),
+                          children: [
+                            ..._clients.map((client) {
+                              final isSelected = _selectedClientIds.contains(client['id']);
+                              return CheckboxListTile(
+                                title: Text('${client['name']} (${client['email']})'),
+                                value: isSelected,
+                                onChanged: (value) {
+                                  setState(() {
+                                    if (value == true) {
+                                      _selectedClientIds.add(client['id']);
+                                    } else {
+                                      _selectedClientIds.remove(client['id']);
+                                    }
+                                  });
+                                },
+                              );
+                            }).toList(),
+                          ],
+                        ),
+                      ),
+              ],
               const SizedBox(height: 20),
               const Text('Attachments',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),

@@ -1,14 +1,19 @@
-import 'dart:io';
+import 'dart:async';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:path_provider/path_provider.dart';
-import 'package:open_file/open_file.dart';
+
+// Conditional imports for non-web platforms
+import 'dart:io' if (dart.library.html) 'dart:html' as io;
+import 'package:path_provider/path_provider.dart' if (dart.library.html) 'package:flutter/foundation.dart';
+import 'package:open_file/open_file.dart' if (dart.library.html) 'package:flutter/foundation.dart';
 
 class RevenueReportScreen extends StatefulWidget {
   const RevenueReportScreen({super.key});
+
   @override
   State<RevenueReportScreen> createState() => _RevenueReportScreenState();
 }
@@ -22,8 +27,12 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
 
   String? selectedMonth;
   int totalPlans = 0;
+  int totalSlots = 0;
   int totalRevenue = 0;
   bool isLoading = false;
+  late int selectedYear;
+  late int currentYear;
+  late int startRangeYear;
 
   final Map<String, int> monthMap = {
     "JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
@@ -48,53 +57,148 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
   @override
   void initState() {
     super.initState();
+    currentYear = DateTime.now().year;
+    selectedYear = currentYear;
+    startRangeYear = currentYear - 3;
     _calculateTotalSummary();
   }
 
+  Future<Map<String, String>> _fetchUserNames(Set<String> ids) async {
+    final Map<String, String> names = {};
+    await Future.wait(ids.map((id) async {
+      if (id.isNotEmpty) {
+        try {
+          final snap = await FirebaseFirestore.instance.collection('users').doc(id).get();
+          names[id] = snap.data()?['name'] as String? ?? 'Unknown';
+        } catch (_) {
+          names[id] = 'Unknown';
+        }
+      }
+    }));
+    return names;
+  }
+
   Future<void> _calculateTotalSummary() async {
+    setState(() {
+      isLoading = true;
+    });
+
     try {
-      final snapshot = await FirebaseFirestore.instance.collection('client_purchases').get();
       int revenue = 0;
-      Set<String> uniquePlans = {};
+      Set<String> uniquePlanCategories = {};
+      int slots = 0;
+
+      // Fetch all client purchases for the year once
+      final yearStart = DateTime(selectedYear, 1, 1);
+      final yearEnd = DateTime(selectedYear + 1, 1, 1);
+      final snapshot = await FirebaseFirestore.instance
+          .collection('client_purchases')
+          .where('purchaseDate', isGreaterThanOrEqualTo: yearStart)
+          .where('purchaseDate', isLessThan: yearEnd)
+          .get();
+
+      print('Fetched ${snapshot.docs.length} client purchase documents for year $selectedYear');
 
       for (var doc in snapshot.docs) {
         final data = doc.data();
-        final price = data['price'] ?? data['plan_price'] ?? 0;
-        if (price is num) revenue += price.toInt();
-        final planName = data['planTitle'] ?? data['plan_name'] ?? data['plan'] ?? data['name'] ?? '';
-        if (planName is String && planName.trim().isNotEmpty) {
-          uniquePlans.add(planName.trim());
+        final paymentStatus = data['paymentStatus']?.toString().toLowerCase() ?? '';
+        final planCategory = (data['Plan_Category'] ?? data['planName'] ?? '') as String;
+        final status = data['status']?.toString().toLowerCase() ?? '';
+
+        print('Document ID: ${doc.id}, Plan Category: "$planCategory", Payment Status: "$paymentStatus", Status: "$status"');
+
+        if (paymentStatus == 'completed') {
+          final price = (data['price'] ?? data['plan_price'] ?? 0) as num;
+          revenue += price.toInt();
+          if (planCategory.trim().isNotEmpty && (status == 'active' || status == 'enabled')) {
+            uniquePlanCategories.add(planCategory.trim().toLowerCase());
+          }
+        }
+      }
+
+      print('Unique active plan categories: ${uniquePlanCategories.length} - $uniquePlanCategories');
+
+      // Fetch slots for the selected year
+      final slotSnapshot = await FirebaseFirestore.instance
+          .collection('trainer_slots')
+          .where('date', isGreaterThanOrEqualTo: yearStart)
+          .where('date', isLessThan: yearEnd)
+          .get();
+
+      print('Fetched ${slotSnapshot.docs.length} trainer slot documents');
+
+      for (var doc in slotSnapshot.docs) {
+        final data = doc.data();
+        final booked = List<String>.from(data['booked_by'] ?? []);
+        if (booked.isEmpty) continue;
+
+        DateTime slotDate;
+        final dateField = data['date'];
+        if (dateField is Timestamp) {
+          slotDate = dateField.toDate();
+        } else {
+          try {
+            slotDate = DateFormat('yyyy-MM-dd').parse(dateField ?? '');
+          } catch (_) {
+            continue;
+          }
+        }
+
+        final statusByUser = Map<String, dynamic>.from(data['status_by_user'] ?? {});
+        for (String clientId in booked) {
+          String status = statusByUser[clientId] ?? data['status'] ?? 'Confirmed';
+          if (status.toLowerCase() != 'cancelled') {
+            slots++;
+          }
         }
       }
 
       setState(() {
         totalRevenue = revenue;
-        totalPlans = uniquePlans.length;
+        totalPlans = uniquePlanCategories.length;
+        totalSlots = slots;
+        isLoading = false;
       });
     } catch (e) {
       print("Error calculating total summary: $e");
+      setState(() {
+        isLoading = false;
+      });
     }
   }
 
   Future<void> _exportPdfReport() async {
+    if (kIsWeb) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('PDF export is not supported on web')),
+      );
+      return;
+    }
+
     final pdf = pw.Document();
-    final currentYear = DateTime.now().year;
+    final reportYear = selectedYear;
     final planCountByName = <String, int>{};
+    final categoryOriginal = <String, String>{};
     int yearlyPlans = 0;
     double yearlyRevenue = 0;
     int totalSlots = 0;
     final monthlyData = <String, Map<String, dynamic>>{};
+    final List<Map<String, dynamic>> yearPlanDetails = [];
+    final List<Map<String, dynamic>> yearSlotDetails = [];
+    final Set<String> yearClientIds = {};
+    final Set<String> yearTrainerIds = {};
+    final Set<String> yearSlotClientIds = {};
 
     for (var entry in monthMap.entries) {
       final monthName = entry.key;
       final monthIndex = entry.value;
-      final start = DateTime(currentYear, monthIndex, 1);
-      final end = monthIndex < 12 ? DateTime(currentYear, monthIndex + 1, 1) : DateTime(currentYear + 1, 1, 1);
+      final start = DateTime(reportYear, monthIndex, 1);
+      final end = monthIndex < 12 ? DateTime(reportYear, monthIndex + 1, 1) : DateTime(reportYear + 1, 1, 1);
 
       final planSnapshot = await FirebaseFirestore.instance
           .collection('client_purchases')
-          .where('timestamp', isGreaterThanOrEqualTo: start)
-          .where('timestamp', isLessThan: end)
+          .where('purchaseDate', isGreaterThanOrEqualTo: start)
+          .where('purchaseDate', isLessThan: end)
           .get();
 
       final slotSnapshot = await FirebaseFirestore.instance
@@ -103,36 +207,122 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
           .where('date', isLessThan: end)
           .get();
 
-      Set<String> uniquePlans = {};
       double monthRevenue = 0;
+      int monthPlans = 0;
       int monthSlots = 0;
+      Set<String> monthUniquePlans = {};
 
       for (var doc in planSnapshot.docs) {
         final data = doc.data();
-        final price = data['price'] ?? data['plan_price'] ?? 0;
-        final planName = data['planTitle'] ?? data['plan_name'] ?? data['plan'] ?? data['name'] ?? '';
-        if (price is num) monthRevenue += price.toDouble();
-        if (planName is String && planName.trim().isNotEmpty) {
-          uniquePlans.add(planName.trim());
-          planCountByName[planName] = (planCountByName[planName] ?? 0) + 1;
+        final paymentStatus = data['paymentStatus']?.toString().toLowerCase() ?? '';
+        final status = data['status']?.toString().toLowerCase() ?? '';
+        final planCategory = (data['Plan_Category'] ?? data['planName'] ?? '') as String;
+        final normCategory = planCategory.trim().toLowerCase();
+        final clientId = data['clientId'] ?? data['client_id'] ?? data['userId'] ?? data['user_id'] ?? data['uid'] ?? '';
+        final purchaseDate = data['purchaseDate'] as Timestamp? ?? Timestamp.now();
+        final cancelledDate = data['cancelledDate'] as Timestamp?;
+
+        if (paymentStatus == 'completed') {
+          final price = (data['price'] ?? data['plan_price'] ?? 0) as num;
+          monthRevenue += price.toDouble();
+          yearClientIds.add(clientId);
+          yearPlanDetails.add({
+            'month': monthName,
+            'plan': planCategory,
+            'clientId': clientId,
+            'amount': price,
+            'date': purchaseDate,
+            'status': status,
+            'paymentStatus': paymentStatus,
+            'cancelledDate': cancelledDate,
+          });
+          if (planCategory.trim().isNotEmpty) {
+            monthUniquePlans.add(normCategory);
+            if (!categoryOriginal.containsKey(normCategory)) {
+              categoryOriginal[normCategory] = planCategory.trim();
+            }
+            planCountByName[normCategory] = (planCountByName[normCategory] ?? 0) + 1;
+          }
         }
       }
 
+      monthPlans = monthUniquePlans.length;
+
       for (var doc in slotSnapshot.docs) {
-        final booked = List<String>.from(doc['booked_by'] ?? []);
-        monthSlots += booked.length;
+        final data = doc.data();
+        final booked = List<String>.from(data['booked_by'] ?? []);
+        if (booked.isEmpty) continue;
+
+        DateTime slotDate;
+        final dateField = data['date'];
+        if (dateField is Timestamp) {
+          slotDate = dateField.toDate();
+        } else {
+          try {
+            slotDate = DateFormat('yyyy-MM-dd').parse(dateField ?? '');
+          } catch (_) {
+            continue;
+          }
+        }
+
+        final formattedDate = DateFormat('dd MMM yyyy').format(slotDate);
+        final time = data['time'] ?? '';
+        final trainerId = data['trainer_id'] ?? data['trainerId'] ?? '';
+        final trainerName = data['trainer_name'] ?? 'Unknown Trainer';
+        final planName = data['plan_name'] ?? 'Unknown Plan';
+        if (trainerId.isNotEmpty) yearTrainerIds.add(trainerId);
+
+        final statusByUser = Map<String, dynamic>.from(data['status_by_user'] ?? {});
+        for (String clientId in booked) {
+          String status = statusByUser[clientId] ?? data['status'] ?? 'Confirmed';
+          if (clientId.isNotEmpty) yearSlotClientIds.add(clientId);
+          yearSlotDetails.add({
+            'month': monthName,
+            'date': formattedDate,
+            'time': time,
+            'clientId': clientId,
+            'trainerId': trainerId,
+            'trainer': trainerName,
+            'plan': planName,
+            'status': status,
+          });
+          if (status.toLowerCase() != 'cancelled') {
+            monthSlots++;
+          }
+        }
       }
 
       monthlyData[monthName] = {
-        'plans': uniquePlans.length,
+        'plans': monthPlans,
         'revenue': monthRevenue,
         'slots': monthSlots,
       };
 
-      yearlyPlans += uniquePlans.length;
       yearlyRevenue += monthRevenue;
       totalSlots += monthSlots;
     }
+
+    yearlyPlans = planCountByName.length;
+
+    final Map<String, String> userNames = await _fetchUserNames(yearClientIds);
+    for (var detail in yearPlanDetails) {
+      detail['client'] = userNames[detail['clientId']] ?? 'Unknown Client';
+    }
+    yearPlanDetails.sort((a, b) => a['date'].compareTo(b['date']));
+
+    final Map<String, String> slotClientNames = await _fetchUserNames(yearSlotClientIds);
+    final Map<String, String> trainerNames = await _fetchUserNames(yearTrainerIds);
+    for (var detail in yearSlotDetails) {
+      detail['client'] = slotClientNames[detail['clientId']] ?? 'Unknown Client';
+      detail['trainer'] = trainerNames[detail['trainerId']] ?? detail['trainer'];
+    }
+    yearSlotDetails.sort((a, b) {
+      final dateCompare = DateFormat('dd MMM yyyy')
+          .parse(a['date'])
+          .compareTo(DateFormat('dd MMM yyyy').parse(b['date']));
+      if (dateCompare != 0) return dateCompare;
+      return a['time'].compareTo(b['time']);
+    });
 
     final topPlans = planCountByName.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
@@ -149,7 +339,7 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
           ),
           pw.SizedBox(height: 20),
           pw.Text(
-            "Year: $currentYear",
+            "Year: $reportYear",
             style: const pw.TextStyle(fontSize: 22),
           ),
           pw.Text(
@@ -181,16 +371,16 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
           ),
           pw.SizedBox(height: 15),
           pw.Table.fromTextArray(
-            headers: ['Month', 'Plans', 'Slots', 'Revenue'],
+            headers: ['Month', 'Plans Purchased', 'Slots', 'Revenue'],
             headerStyle: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold),
             cellStyle: const pw.TextStyle(fontSize: 20),
             cellAlignment: pw.Alignment.center,
             headerAlignment: pw.Alignment.center,
             columnWidths: {
-              0: const pw.FixedColumnWidth(120),
+              0: const pw.FixedColumnWidth(100),
               1: const pw.FixedColumnWidth(100),
-              2: const pw.FixedColumnWidth(100),
-              3: const pw.FixedColumnWidth(120),
+              2: const pw.FixedColumnWidth(80),
+              3: const pw.FixedColumnWidth(100),
             },
             data: monthMap.keys.map((month) {
               final m = monthlyData[month]!;
@@ -221,10 +411,11 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
             pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: topPlans.take(5).map((e) {
+                final originalName = categoryOriginal[e.key] ?? e.key;
                 return pw.Padding(
                   padding: const pw.EdgeInsets.only(bottom: 10),
                   child: pw.Text(
-                    "• ${e.key}: ${e.value} purchases",
+                    "• $originalName: ${e.value} purchases",
                     style: const pw.TextStyle(fontSize: 22),
                   ),
                 );
@@ -234,9 +425,99 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
       ),
     );
 
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4.copyWith(marginTop: 1.5 * PdfPageFormat.cm),
+        build: (context) => [
+          pw.Text(
+            "4. Detailed Plan Purchases",
+            style: pw.TextStyle(fontSize: 26, fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(height: 15),
+          if (yearPlanDetails.isEmpty)
+            pw.Text("No data available.", style: const pw.TextStyle(fontSize: 22))
+          else
+            pw.Table.fromTextArray(
+              headers: ['Month', 'Plan Category', 'Client', 'Amount', 'Date', 'Status', 'Payment Status', 'Cancel Date'],
+              headerStyle: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold),
+              cellStyle: const pw.TextStyle(fontSize: 18),
+              cellAlignment: pw.Alignment.centerLeft,
+              headerAlignment: pw.Alignment.centerLeft,
+              columnWidths: {
+                0: const pw.FlexColumnWidth(1),
+                1: const pw.FlexColumnWidth(2),
+                2: const pw.FlexColumnWidth(2),
+                3: const pw.FlexColumnWidth(1),
+                4: const pw.FlexColumnWidth(1),
+                5: const pw.FlexColumnWidth(1),
+                6: const pw.FlexColumnWidth(1),
+                7: const pw.FlexColumnWidth(1),
+              },
+              data: yearPlanDetails.map((detail) {
+                final dateStr = DateFormat('dd MMM yyyy').format((detail['date'] as Timestamp).toDate());
+                final cancelStr = detail['cancelledDate'] != null ? DateFormat('dd MMM yyyy').format((detail['cancelledDate'] as Timestamp).toDate()) : 'N/A';
+                return [
+                  detail['month'],
+                  detail['plan'],
+                  detail['client'],
+                  '\$${ (detail['amount'] as num).toStringAsFixed(2) }',
+                  dateStr,
+                  detail['status'],
+                  detail['paymentStatus'],
+                  cancelStr,
+                ];
+              }).toList(),
+            ),
+        ],
+      ),
+    );
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4.copyWith(marginTop: 1.5 * PdfPageFormat.cm),
+        build: (context) => [
+          pw.Text(
+            "5. Detailed Slot Bookings",
+            style: pw.TextStyle(fontSize: 26, fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(height: 15),
+          if (yearSlotDetails.isEmpty)
+            pw.Text("No data available.", style: const pw.TextStyle(fontSize: 22))
+          else
+            pw.Table.fromTextArray(
+              headers: ['Month', 'Date', 'Time', 'Client', 'Trainer', 'Plan', 'Status'],
+              headerStyle: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold),
+              cellStyle: const pw.TextStyle(fontSize: 18),
+              cellAlignment: pw.Alignment.centerLeft,
+              headerAlignment: pw.Alignment.centerLeft,
+              columnWidths: {
+                0: const pw.FlexColumnWidth(1),
+                1: const pw.FlexColumnWidth(1),
+                2: const pw.FlexColumnWidth(1),
+                3: const pw.FlexColumnWidth(2),
+                4: const pw.FlexColumnWidth(2),
+                5: const pw.FlexColumnWidth(2),
+                6: const pw.FlexColumnWidth(1),
+              },
+              data: yearSlotDetails.map((detail) {
+                return [
+                  detail['month'],
+                  detail['date'],
+                  detail['time'],
+                  detail['client'],
+                  detail['trainer'],
+                  detail['plan'],
+                  detail['status'],
+                ];
+              }).toList(),
+            ),
+        ],
+      ),
+    );
+
     try {
       final outputDir = await getTemporaryDirectory();
-      final outputFile = File("${outputDir.path}/Flex_Revenue_Report_$currentYear.pdf");
+      final outputFile = io.File("${outputDir.path}/Flex_Revenue_Report_$reportYear.pdf");
       await outputFile.writeAsBytes(await pdf.save());
       await OpenFile.open(outputFile.path);
     } catch (e) {
@@ -267,8 +548,17 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                _buildSummaryCard("Total Plans", totalPlans.toString(), accentColor),
-                _buildSummaryCard("Total Revenue", '\$${totalRevenue.toStringAsFixed(2)}', highlightColor),
+                Expanded(
+                  child: _buildSummaryCard("Plans Purchased", totalPlans.toString(), accentColor),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildSummaryCard("Slots Booked", totalSlots.toString(), primaryColor),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildSummaryCard("Revenue", '\$$totalRevenue', highlightColor),
+                ),
               ],
             ),
             const SizedBox(height: 24),
@@ -310,6 +600,95 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
               }).toList(),
             ),
             const SizedBox(height: 32),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.arrow_left),
+                  onPressed: () {
+                    setState(() {
+                      startRangeYear -= 5;
+                    });
+                  },
+                ),
+                Text(
+                  "Select Year",
+                  style: TextStyle(
+                    fontSize: 18,
+                    color: textColor,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.arrow_right),
+                  onPressed: () {
+                    setState(() {
+                      startRangeYear += 5;
+                    });
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            GestureDetector(
+              onHorizontalDragEnd: (DragEndDetails details) {
+                double velocity = details.primaryVelocity ?? 0;
+                if (velocity > 300) {
+                  // Swipe right, go to previous range
+                  setState(() {
+                    startRangeYear -= 5;
+                  });
+                } else if (velocity < -300) {
+                  // Swipe left, go to next range
+                  setState(() {
+                    startRangeYear += 5;
+                  });
+                }
+              },
+              child: GridView.count(
+                crossAxisCount: 3,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                childAspectRatio: 1.5,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                children: List.generate(6, (index) {
+                  int year = startRangeYear + index;
+                  bool isSelected = selectedYear == year;
+                  return GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        selectedYear = year;
+                        _calculateTotalSummary();
+                      });
+                    },
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: isSelected ? highlightColor.withOpacity(0.8) : cardColor,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 6,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        year.toString(),
+                        style: TextStyle(
+                          fontSize: 18,
+                          color: isSelected ? Colors.white : textColor,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              ),
+            ),
+            const SizedBox(height: 32),
             if (isLoading) const CircularProgressIndicator(),
           ],
         ),
@@ -318,36 +697,48 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
   }
 
   Widget _buildSummaryCard(String title, String value, Color color) {
-    return Expanded(
-      child: Card(
-        elevation: 4,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        color: cardColor,
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            children: [
-              Text(
-                value,
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: color,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 16,
-                  color: textColor.withOpacity(0.8),
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ],
+    return Container(
+      height: 120,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
           ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 16,
+                color: textColor.withOpacity(0.8),
+                fontWeight: FontWeight.w600,
+              ),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
         ),
       ),
     );
@@ -355,7 +746,7 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
 
   void _navigateToMonthReport(String month) {
     final monthIndex = monthMap[month]!;
-    final year = DateTime.now().year;
+    final year = selectedYear;
     final start = DateTime(year, monthIndex, 1);
     final end = monthIndex < 12 ? DateTime(year, monthIndex + 1, 1) : DateTime(year + 1, 1, 1);
 
@@ -376,8 +767,6 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
     );
   }
 }
-
-// -------- MonthlyReportScreen ----------
 
 class MonthlyReportScreen extends StatefulWidget {
   final String monthName;
@@ -408,122 +797,171 @@ class MonthlyReportScreen extends StatefulWidget {
 class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
   int plans = 0;
   int slots = 0;
+  int cancelledSlots = 0;
+  int totalCreatedSlots = 0;
+  int availableSlots = 0;
   double revenue = 0;
   bool loading = true;
   List<Map<String, dynamic>> planDetails = [];
   List<Map<String, dynamic>> slotDetails = [];
   List<Map<String, dynamic>> revenueDetails = [];
 
+  StreamSubscription<QuerySnapshot>? _planSub;
+  StreamSubscription<QuerySnapshot>? _slotSub;
+
   @override
   void initState() {
     super.initState();
-    _fetchMonthlyData();
+    _startListening();
   }
 
-  Future<void> _fetchMonthlyData() async {
-    try {
-      final planSnapshot = await FirebaseFirestore.instance
-          .collection('client_purchases')
-          .where('timestamp', isGreaterThanOrEqualTo: widget.start)
-          .where('timestamp', isLessThan: widget.end)
-          .get();
+  void _startListening() {
+    _planSub = FirebaseFirestore.instance
+        .collection('client_purchases')
+        .where('purchaseDate', isGreaterThanOrEqualTo: widget.start)
+        .where('purchaseDate', isLessThan: widget.end)
+        .snapshots()
+        .listen((snapshot) async {
+      double newRevenue = 0;
+      List<Map<String, dynamic>> newPlanDetails = [];
+      List<Map<String, dynamic>> newRevenueDetails = [];
+      Set<String> userIds = {};
+      Set<String> activeCategories = {};
 
-      Set<String> uniquePlans = {};
-      revenue = 0;
-      planDetails = [];
-      revenueDetails = [];
-
-      for (var doc in planSnapshot.docs) {
+      for (var doc in snapshot.docs) {
         final data = doc.data();
-        final price = data['price'] ?? data['plan_price'] ?? 0;
-        final amount = (price as num).toDouble();
-        revenue += amount;
+        final paymentStatus = data['paymentStatus']?.toString().toLowerCase() ?? '';
+        final status = data['status']?.toString().toLowerCase() ?? '';
+        final planCategory = (data['Plan_Category'] ?? data['planName'] ?? '') as String;
+        final clientId = data['clientId'] ?? data['client_id'] ?? data['userId'] ?? data['user_id'] ?? data['uid'] ?? '';
+        final purchaseDate = data['purchaseDate'] as Timestamp? ?? Timestamp.now();
+        final cancelledDate = data['cancelledDate'] as Timestamp?;
+        if (clientId.isNotEmpty) userIds.add(clientId);
 
-        final planName = data['planTitle'] ?? data['plan_name'] ?? data['plan'] ?? data['name'] ?? '';
-        String clientName = 'Unknown Client';
-
-        try {
-          final clientId = data['clientId'] ?? data['client_id'] ?? '';
-          if (clientId != null && clientId.toString().isNotEmpty) {
-            final userDoc = await FirebaseFirestore.instance.collection('users').doc(clientId.toString()).get();
-            if (userDoc.exists) {
-              clientName = userDoc.data()?['name'] ?? 'Unknown Client';
-            }
-          } else {
-            clientName = data['clientName'] ?? data['client_name'] ?? 'Unknown Client';
+        if (paymentStatus == 'completed') {
+          final price = (data['price'] ?? data['plan_price'] ?? 0) as num;
+          newRevenue += price.toDouble();
+          final normCategory = planCategory.trim().toLowerCase();
+          if (planCategory.trim().isNotEmpty && (status == 'active' || status == 'enabled')) {
+            activeCategories.add(normCategory);
           }
-        } catch (_) {}
 
-        if (planName is String && planName.trim().isNotEmpty) {
-          uniquePlans.add(planName.trim());
-
-          planDetails.add({
-            'plan': planName,
-            'client': clientName,
-            'date': DateFormat('dd MMM yyyy').format(data['timestamp']?.toDate() ?? DateTime.now()),
+          newPlanDetails.add({
+            'plan': planCategory,
+            'clientId': clientId,
+            'date': DateFormat('dd MMM yyyy').format(purchaseDate.toDate()),
+            'status': status,
+            'cancelledDate': cancelledDate != null ? DateFormat('dd MMM yyyy').format(cancelledDate.toDate()) : null,
           });
 
-          revenueDetails.add({
-            'plan': planName,
-            'client': clientName,
-            'amount': amount,
-            'date': DateFormat('dd MMM yyyy').format(data['timestamp']?.toDate() ?? DateTime.now()),
+          newRevenueDetails.add({
+            'plan': planCategory,
+            'clientId': clientId,
+            'amount': price,
+            'date': DateFormat('dd MMM yyyy').format(purchaseDate.toDate()),
+            'status': status,
+            'paymentStatus': paymentStatus,
+            'cancelledDate': cancelledDate != null ? DateFormat('dd MMM yyyy').format(cancelledDate.toDate()) : null,
           });
         }
       }
-      plans = uniquePlans.length;
 
-      final slotSnapshot = await FirebaseFirestore.instance
-          .collection('trainer_slots')
-          .where('date', isGreaterThanOrEqualTo: widget.start)
-          .where('date', isLessThan: widget.end)
-          .get();
+      Map<String, String> userNames = await _fetchUserNames(userIds);
+      for (var detail in newPlanDetails) {
+        detail['client'] = userNames[detail['clientId']] ?? 'Unknown Client';
+      }
+      for (var detail in newRevenueDetails) {
+        detail['client'] = userNames[detail['clientId']] ?? 'Unknown Client';
+      }
 
-      slotDetails = [];
-      slots = 0;
+      if (mounted) {
+        setState(() {
+          plans = activeCategories.isEmpty ? snapshot.docs.length : activeCategories.length;
+          revenue = newRevenue;
+          planDetails = newPlanDetails;
+          revenueDetails = newRevenueDetails;
+          loading = false;
+        });
+      }
+    });
 
-      for (var doc in slotSnapshot.docs) {
+    _slotSub = FirebaseFirestore.instance
+        .collection('trainer_slots')
+        .where('date', isGreaterThanOrEqualTo: widget.start)
+        .where('date', isLessThan: widget.end)
+        .snapshots()
+        .listen((snapshot) async {
+      List<Map<String, dynamic>> newSlotDetails = [];
+      int newSlots = 0;
+      int newCancelledSlots = 0;
+      int newAvailableSlots = 0;
+      final int newTotalCreatedSlots = snapshot.docs.length;
+      Set<String> clientIds = {};
+      Set<String> trainerIds = {};
+
+      for (var doc in snapshot.docs) {
         final data = doc.data();
-        final bookedBy = List<String>.from(data['booked_by'] ?? []);
-        final timestamp = data['date'];
+        final booked = List<String>.from(data['booked_by'] ?? []);
         DateTime slotDate;
-        if (timestamp is Timestamp) {
-          slotDate = timestamp.toDate();
+        final dateField = data['date'];
+        if (dateField is Timestamp) {
+          slotDate = dateField.toDate();
         } else {
           try {
-            slotDate = DateFormat('yyyy-MM-dd').parse(data['date'] ?? '');
+            slotDate = DateFormat('yyyy-MM-dd').parse(dateField ?? '');
           } catch (_) {
-            slotDate = DateTime.now();
+            continue;
           }
         }
+
         final formattedDate = DateFormat('dd MMM yyyy').format(slotDate);
         final time = data['time'] ?? '';
+        final trainerId = data['trainer_id'] ?? data['trainerId'] ?? '';
         final trainerName = data['trainer_name'] ?? 'Unknown Trainer';
         final planName = data['plan_name'] ?? 'Unknown Plan';
+        if (trainerId.isNotEmpty) trainerIds.add(trainerId);
 
-        for (String clientId in bookedBy) {
-          try {
-            String userName = "Unknown User";
-            if (clientId.isNotEmpty) {
-              final userDoc = await FirebaseFirestore.instance.collection('users').doc(clientId).get();
-              userName = userDoc.exists ? (userDoc.data()?['name'] ?? 'Unknown User') : 'Unknown User';
-            }
+        final statusByUser = Map<String, dynamic>.from(data['status_by_user'] ?? {});
+        bool hasConfirmed = false;
 
-            slotDetails.add({
+        if (booked.isNotEmpty) {
+          for (String clientId in booked) {
+            if (clientId.isNotEmpty) clientIds.add(clientId);
+            String status = statusByUser[clientId] ?? data['status'] ?? 'Confirmed';
+
+            newSlotDetails.add({
               'date': formattedDate,
               'time': time,
-              'client': userName,
+              'clientId': clientId,
+              'trainerId': trainerId,
               'trainer': trainerName,
               'plan': planName,
+              'status': status,
             });
-            slots++;
-          } catch (e) {
-            print("Error in fetching slot user/trainer info: $e");
+
+            if (status.toLowerCase() != 'cancelled') {
+              newSlots++;
+              hasConfirmed = true;
+            } else {
+              newCancelledSlots++;
+            }
           }
+        }
+
+        if (!hasConfirmed) {
+          newAvailableSlots++;
         }
       }
 
-      slotDetails.sort((a, b) {
+      Map<String, String> userNames = await _fetchUserNames(clientIds);
+      Map<String, String> trainerNames = await _fetchUserNames(trainerIds);
+
+      for (var detail in newSlotDetails) {
+        detail['client'] = userNames[detail['clientId']] ?? 'Unknown User';
+        detail['trainer'] = trainerNames[detail['trainerId']] ?? detail['trainer'];
+      }
+
+      newSlotDetails.sort((a, b) {
         final dateCompare = DateFormat('dd MMM yyyy')
             .parse(a['date'])
             .compareTo(DateFormat('dd MMM yyyy').parse(b['date']));
@@ -531,14 +969,49 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
         return a['time'].compareTo(b['time']);
       });
 
-      setState(() => loading = false);
-    } catch (e) {
-      print("Error loading month data: $e");
-      setState(() => loading = false);
-    }
+      if (mounted) {
+        setState(() {
+          slots = newSlots;
+          cancelledSlots = newCancelledSlots;
+          totalCreatedSlots = newTotalCreatedSlots;
+          availableSlots = newAvailableSlots;
+          slotDetails = newSlotDetails;
+          loading = false;
+        });
+      }
+    });
+  }
+
+  Future<Map<String, String>> _fetchUserNames(Set<String> ids) async {
+    final Map<String, String> names = {};
+    await Future.wait(ids.map((id) async {
+      if (id.isNotEmpty) {
+        try {
+          final snap = await FirebaseFirestore.instance.collection('users').doc(id).get();
+          names[id] = snap.data()?['name'] as String? ?? 'Unknown';
+        } catch (_) {
+          names[id] = 'Unknown';
+        }
+      }
+    }));
+    return names;
+  }
+
+  @override
+  void dispose() {
+    _planSub?.cancel();
+    _slotSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _exportMonthlyPdf() async {
+    if (kIsWeb) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('PDF export is not supported on web')),
+      );
+      return;
+    }
+
     final pdf = pw.Document();
     final year = widget.start.year;
 
@@ -585,7 +1058,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
             pw.Text("No plan purchases recorded", style: const pw.TextStyle(fontSize: 18))
           else
             pw.Table.fromTextArray(
-              headers: ['Plan Name', 'Client', 'Date'],
+              headers: ['Plan Category', 'Client', 'Date', 'Status', 'Cancel Date'],
               headerStyle: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold),
               cellStyle: const pw.TextStyle(fontSize: 18),
               cellAlignment: pw.Alignment.centerLeft,
@@ -594,12 +1067,16 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                 0: const pw.FlexColumnWidth(2),
                 1: const pw.FlexColumnWidth(2),
                 2: const pw.FlexColumnWidth(1),
+                3: const pw.FlexColumnWidth(1),
+                4: const pw.FlexColumnWidth(1),
               },
               data: planDetails.map((detail) {
                 return [
                   detail['plan'],
                   detail['client'],
                   detail['date'],
+                  detail['status'],
+                  detail['cancelledDate'] ?? 'N/A',
                 ];
               }).toList(),
             ),
@@ -620,7 +1097,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
             pw.Text("No revenue data available", style: const pw.TextStyle(fontSize: 18))
           else
             pw.Table.fromTextArray(
-              headers: ['Plan', 'Client', 'Amount', 'Date'],
+              headers: ['Plan Category', 'Client', 'Amount', 'Date', 'Status', 'Payment Status', 'Cancel Date'],
               headerStyle: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold),
               cellStyle: const pw.TextStyle(fontSize: 18),
               cellAlignment: pw.Alignment.centerLeft,
@@ -630,6 +1107,9 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                 1: const pw.FlexColumnWidth(2),
                 2: const pw.FlexColumnWidth(1),
                 3: const pw.FlexColumnWidth(1),
+                4: const pw.FlexColumnWidth(1),
+                5: const pw.FlexColumnWidth(1),
+                6: const pw.FlexColumnWidth(1),
               },
               data: revenueDetails.map((detail) {
                 return [
@@ -637,6 +1117,9 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                   detail['client'],
                   '\$${detail['amount'].toStringAsFixed(2)}',
                   detail['date'],
+                  detail['status'],
+                  detail['paymentStatus'],
+                  detail['cancelledDate'] ?? 'N/A',
                 ];
               }).toList(),
             ),
@@ -657,7 +1140,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
             pw.Text("No slot bookings recorded", style: const pw.TextStyle(fontSize: 18))
           else
             pw.Table.fromTextArray(
-              headers: ['Date', 'Time', 'Client', 'Trainer', 'Plan'],
+              headers: ['Date', 'Time', 'Client', 'Trainer', 'Plan', 'Status'],
               headerStyle: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold),
               cellStyle: const pw.TextStyle(fontSize: 18),
               cellAlignment: pw.Alignment.centerLeft,
@@ -668,6 +1151,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                 2: const pw.FlexColumnWidth(2),
                 3: const pw.FlexColumnWidth(2),
                 4: const pw.FlexColumnWidth(2),
+                5: const pw.FlexColumnWidth(1),
               },
               data: slotDetails.map((detail) {
                 return [
@@ -676,6 +1160,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                   detail['client'],
                   detail['trainer'],
                   detail['plan'],
+                  detail['status'],
                 ];
               }).toList(),
             ),
@@ -685,7 +1170,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
 
     try {
       final outputDir = await getTemporaryDirectory();
-      final outputFile = File("${outputDir.path}/Flex_${widget.monthName}Report$year.pdf");
+      final outputFile = io.File("${outputDir.path}/Flex_${widget.monthName}_Report_$year.pdf");
       await outputFile.writeAsBytes(await pdf.save());
       await OpenFile.open(outputFile.path);
     } catch (e) {
@@ -715,7 +1200,24 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                       margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
                       child: ListTile(
                         title: Text(detail['plan'], style: const TextStyle(fontSize: 18)),
-                        subtitle: Text(detail['client'], style: const TextStyle(fontSize: 16)),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text("Client: ${detail['client']}", style: const TextStyle(fontSize: 16)),
+                            Text(
+                              "Status: ${detail['status']}",
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: detail['status'].toLowerCase() == 'active' ? Colors.green : Colors.red,
+                              ),
+                            ),
+                            if (detail['cancelledDate'] != null)
+                              Text(
+                                "Cancelled: ${detail['cancelledDate']}",
+                                style: const TextStyle(fontSize: 16, color: Colors.red),
+                              ),
+                          ],
+                        ),
                         trailing: Text(detail['date'], style: const TextStyle(fontSize: 16)),
                       ),
                     );
@@ -746,14 +1248,38 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                       margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
                       child: ListTile(
                         title: Text(detail['plan'], style: const TextStyle(fontSize: 18)),
-                        subtitle: Text(detail['client'], style: const TextStyle(fontSize: 16)),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text("Client: ${detail['client']}", style: const TextStyle(fontSize: 16)),
+                            Text(
+                              "Status: ${detail['status']}",
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: detail['status'].toLowerCase() == 'active' ? Colors.green : (detail['status'].toLowerCase() == 'cancelled' ? Colors.red : Colors.black),
+                              ),
+                            ),
+                            Text(
+                              "Payment: ${detail['paymentStatus']}",
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: detail['paymentStatus'].toLowerCase() == 'completed' ? Colors.green : Colors.orange,
+                              ),
+                            ),
+                            if (detail['cancelledDate'] != null)
+                              Text(
+                                "Cancelled: ${detail['cancelledDate']}",
+                                style: const TextStyle(fontSize: 16, color: Colors.red),
+                              ),
+                          ],
+                        ),
                         trailing: Column(
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
                             Text(
                               '\$${detail['amount'].toStringAsFixed(2)}',
-                              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.green),
                             ),
                             Text(detail['date'], style: const TextStyle(fontSize: 16)),
                           ],
@@ -765,6 +1291,21 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
         ),
       ),
     );
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'confirmed':
+        return Colors.green;
+      case 'rescheduled':
+        return Colors.orange;
+      case 'cancelled':
+        return Colors.red;
+      case 'upcoming':
+        return Colors.blue;
+      default:
+        return Colors.black;
+    }
   }
 
   void _showSlotDetails() {
@@ -796,6 +1337,13 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                             Text("Trainer: ${detail['trainer']}", style: const TextStyle(fontSize: 16)),
                             Text("Time: ${detail['time']}", style: const TextStyle(fontSize: 16)),
                             Text("Plan: ${detail['plan']}", style: const TextStyle(fontSize: 16)),
+                            Text(
+                              "Status: ${detail['status']}",
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: _getStatusColor(detail['status']),
+                              ),
+                            ),
                           ],
                         ),
                         trailing: Column(
@@ -816,9 +1364,6 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final cardWidth = screenWidth * 0.9;
-
     return Scaffold(
       appBar: AppBar(
         title: Text("${widget.fullMonthName} Report", style: const TextStyle(color: Colors.white, fontSize: 20)),
@@ -834,71 +1379,68 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const SizedBox(height: 20),
-                    SizedBox(
-                      width: cardWidth,
-                      child: GestureDetector(
-                        onTap: _showPlanDetails,
-                        child: _buildMetricCard("Plans Purchased", plans.toString(), widget.highlightColor),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    SizedBox(
-                      width: cardWidth,
-                      child: GestureDetector(
-                        onTap: _showSlotDetails,
-                        child: _buildMetricCard("Slots Booked", slots.toString(), widget.primaryColor),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    SizedBox(
-                      width: cardWidth,
-                      child: GestureDetector(
-                        onTap: _showRevenueDetails,
-                        child: _buildMetricCard("Revenue", '\$${revenue.toStringAsFixed(2)}', Colors.green),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                  ],
-                ),
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                children: [
+                  _buildMetricCard("Plans Purchased", plans.toString(), widget.highlightColor, onTap: _showPlanDetails),
+                  const SizedBox(height: 16),
+                  _buildMetricCard("Slots Booked", slots.toString(), widget.primaryColor, onTap: _showSlotDetails),
+                  const SizedBox(height: 16),
+                  _buildMetricCard("Revenue", '\$${revenue.toStringAsFixed(2)}', Colors.green, onTap: _showRevenueDetails),
+                  const SizedBox(height: 20),
+                ],
               ),
             ),
     );
   }
 
-  Widget _buildMetricCard(String label, String value, Color color) {
-    return Card(
-      elevation: 4,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
-      color: color,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 24.0, horizontal: 16.0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              value,
-              style: const TextStyle(
-                fontSize: 32,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 20,
-                color: Colors.white,
-              ),
+  Widget _buildMetricCard(String label, String value, Color color, {VoidCallback? onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        height: 120,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
             ),
           ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: color,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 16,
+                  color: widget.textColor.withOpacity(0.8),
+                  fontWeight: FontWeight.w600,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
         ),
       ),
     );
