@@ -10,7 +10,6 @@ import 'package:crypto/crypto.dart';
 import 'dart:convert';
 import 'package:share_plus/share_plus.dart';
 import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 class PostAnnouncementScreen extends StatefulWidget {
   final Map<String, dynamic>? editData;
@@ -78,7 +77,7 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen>
       
       setState(() {
         _clients = snapshot.docs.map((doc) {
-          final data = doc.data() as Map<String, dynamic>;
+          final data = doc.data();
           return {
             'id': doc.id,
             'name': data['name'] ?? 'Unknown',
@@ -552,7 +551,6 @@ class ReferralsTab extends StatefulWidget {
 class _ReferralsTabState extends State<ReferralsTab> {
   String _referralCode = '';
   String _referralLink = '';
-  bool _isLoading = false;
 
   String _rewardTitle = '1 Free Session';
   String _rewardDescription =
@@ -599,43 +597,6 @@ class _ReferralsTabState extends State<ReferralsTab> {
     _referralLink =
         'https://play.google.com/store/apps/details?id=com.yourfitnessapp&referrer=referral_code%3D$_referralCode';
     setState(() {});
-  }
-
-  Future<void> _referByEmail() async {
-    setState(() => _isLoading = true);
-
-    final emailContent = '''
-Hi there!
-
-Use my referral code: $_referralCode
-
-New members get $_rewardTitle ($_rewardDescription)
-
-Install here: $_referralLink
-
-Cheers!
-''';
-
-    final encodedSubject = Uri.encodeComponent('Join Fitness Hub & Get $_rewardTitle!');
-    final encodedBody = Uri.encodeComponent(emailContent);
-
-    try {
-      final Uri emailUri = Uri.parse('mailto:?subject=$encodedSubject&body=$encodedBody');
-      if (await canLaunchUrl(emailUri)) {
-        await launchUrl(emailUri);
-      } else {
-        throw 'Could not launch email client';
-      }
-    } catch (e) {
-      await Clipboard.setData(ClipboardData(text: emailContent));
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Could not open email app. Content copied to clipboard.'),
-        ),
-      );
-    } finally {
-      setState(() => _isLoading = false);
-    }
   }
 
   Future<void> _shareLink() async {
@@ -791,35 +752,22 @@ $_referralLink
             ),
           ),
           const SizedBox(height: 24),
-          if (_isLoading)
-            const Center(child: CircularProgressIndicator()),
-          if (!_isLoading)
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.mail_outline),
-                    label: const Text('Refer by Email'),
-                    onPressed: _referByEmail,
-                    style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        backgroundColor: const Color(0xFF1A2B63)),
-                  ),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.share),
+              label: const Text('Share Link'),
+              onPressed: _shareLink,
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                backgroundColor: const Color(0xFF1A2B63),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.share),
-                    label: const Text('Share Link'),
-                    onPressed: _shareLink,
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      side: const BorderSide(color: Color(0xFF1A2B63)),
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
+          ),
         ],
       ),
     );

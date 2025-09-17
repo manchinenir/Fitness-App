@@ -10,29 +10,23 @@ class PlansScreen extends StatefulWidget {
 }
 
 class _PlansScreenState extends State<PlansScreen> {
-
-
   final _formKey = GlobalKey<FormState>();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  // Controllers for form fields
   final _nameController = TextEditingController();
   final _priceController = TextEditingController();
   final _sessionsController = TextEditingController();
   final _descriptionController = TextEditingController();
+  final _categoryController = TextEditingController();
 
-  // Selected values for dropdowns
   String _selectedCategory = 'Semi Private Monthly Plans';
   String _selectedStatus = 'Active';
 
-  // Current editing index (-1 means adding new plan)
   int _editingIndex = -1;
   String? _editingDocId;
 
-  // Plans data - now populated from Firestore
   List<Map<String, dynamic>> _plans = [];
 
-  // Plan categories
   final List<String> _categories = [
     'Semi Private Monthly Plans',
     'Semi Private Bi Weekly Plans',
@@ -43,10 +37,8 @@ class _PlansScreenState extends State<PlansScreen> {
     'Athletic Performance (Adult)',
   ];
 
-  // Status options
   final List<String> _statusOptions = ['Active', 'Inactive'];
 
-  // Track expanded plan cards
   int? _expandedPlanIndex;
 
   @override
@@ -55,7 +47,6 @@ class _PlansScreenState extends State<PlansScreen> {
     _loadInitialPlans();
   }
 
-  // Load initial plans to Firestore (always overwrite)
   Future<void> _loadInitialPlans() async {
     try {
       List<Map<String, dynamic>> initialPlans = [
@@ -200,6 +191,7 @@ class _PlansScreenState extends State<PlansScreen> {
     _priceController.dispose();
     _sessionsController.dispose();
     _descriptionController.dispose();
+    _categoryController.dispose();
     super.dispose();
   }
 
@@ -208,10 +200,75 @@ class _PlansScreenState extends State<PlansScreen> {
     _priceController.clear();
     _sessionsController.clear();
     _descriptionController.clear();
+    _categoryController.clear();
     _selectedCategory = 'Semi Private Monthly Plans';
     _selectedStatus = 'Active';
     _editingIndex = -1;
     _editingDocId = null;
+  }
+
+  Future<void> _showAddCategoryDialog(StateSetter? parentSetState) async {
+    _categoryController.clear();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text(
+            'Add New Category',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF00BCD4),
+            ),
+          ),
+          content: TextFormField(
+            controller: _categoryController,
+            decoration: const InputDecoration(
+              labelText: 'Category Name *',
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.category),
+              hintText: 'Enter new category name',
+            ),
+            textCapitalization: TextCapitalization.words,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _categoryController.clear();
+              },
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                String newCategory = _categoryController.text.trim();
+                if (newCategory.isNotEmpty && !_categories.contains(newCategory)) {
+                  Navigator.of(context).pop(newCategory);
+                } else if (newCategory.isEmpty) {
+                  _showSnackBar('Please enter a category name');
+                } else {
+                  _showSnackBar('Category already exists');
+                }
+              },
+              child: const Text('Add Category'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (result != null) {
+      setState(() {
+        _categories.add(result);
+        _selectedCategory = result;
+      });
+      if (parentSetState != null) {
+        parentSetState(() {
+          _selectedCategory = result;
+        });
+      }
+      _showSnackBar('New category "$result" added successfully!');
+    }
+    _categoryController.clear();
   }
 
   void _showAddEditDialog({int? index}) {
@@ -232,168 +289,198 @@ class _PlansScreenState extends State<PlansScreen> {
     showDialog(
       context: context,
       builder: (BuildContext context) {
-        return Align(
-          alignment: Alignment.center,
-          child: FractionallySizedBox(
-            widthFactor: 0.9,
-            child: AlertDialog(
-              insetPadding: EdgeInsets.zero,
-              scrollable: true,
-              title: Text(
-                _editingIndex == -1 ? 'Add New Plan' : 'Edit Plan',
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF00BCD4),
-                ),
-              ),
-              content: SingleChildScrollView(
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      TextFormField(
-                        controller: _nameController,
-                        decoration: const InputDecoration(
-                          labelText: 'Plan Name *',
-                          border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.fitness_center),
-                        ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Please enter plan name';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      DropdownButtonFormField<String>(
-                        value: _selectedCategory,
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Category *',
-                          border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.category),
-                        ),
-                        items: _categories.map((String category) {
-                          return DropdownMenuItem<String>(
-                            value: category,
-                            child: Text(category, overflow: TextOverflow.ellipsis),
-                          );
-                        }).toList(),
-                        onChanged: (String? newValue) {
-                          setState(() {
-                            _selectedCategory = newValue!;
-                          });
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        controller: _sessionsController,
-                        decoration: const InputDecoration(
-                          labelText: 'Number of Sessions *',
-                          border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.numbers),
-                        ),
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Please enter number of sessions';
-                          }
-                          int? sessions = int.tryParse(value);
-                          if (sessions == null || sessions <= 0) {
-                            return 'Please enter a valid number of sessions';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        controller: _priceController,
-                        decoration: const InputDecoration(
-                          labelText: 'Price (\$) *',
-                          border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.attach_money),
-                        ),
-                        keyboardType:
-                            const TextInputType.numberWithOptions(decimal: true),
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
-                        ],
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Please enter price';
-                          }
-                          double? price = double.tryParse(value);
-                          if (price == null || price <= 0) {
-                            return 'Please enter a valid price';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      DropdownButtonFormField<String>(
-                        value: _selectedStatus,
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Status *',
-                          border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.toggle_on),
-                        ),
-                        items: _statusOptions.map((String status) {
-                          return DropdownMenuItem<String>(
-                            value: status,
-                            child: Text(status),
-                          );
-                        }).toList(),
-                        onChanged: (String? newValue) {
-                          setState(() {
-                            _selectedStatus = newValue!;
-                          });
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        controller: _descriptionController,
-                        decoration: const InputDecoration(
-                          labelText: 'Description',
-                          border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.description),
-                        ),
-                        maxLines: 3,
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Please enter description';
-                          }
-                          return null;
-                        },
-                      ),
-                    ],
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setDialogState) {
+            return Align(
+              alignment: Alignment.center,
+              child: FractionallySizedBox(
+                widthFactor: 0.9,
+                child: AlertDialog(
+                  insetPadding: EdgeInsets.zero,
+                  scrollable: true,
+                  title: Text(
+                    _editingIndex == -1 ? 'Add New Plan' : 'Edit Plan',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF00BCD4),
+                    ),
                   ),
+                  content: SingleChildScrollView(
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TextFormField(
+                            controller: _nameController,
+                            decoration: const InputDecoration(
+                              labelText: 'Plan Name *',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.fitness_center),
+                            ),
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'Please enter plan name';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 16),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              DropdownButtonFormField<String>(
+                                value: _selectedCategory,
+                                isExpanded: true,
+                                decoration: const InputDecoration(
+                                  labelText: 'Category *',
+                                  border: OutlineInputBorder(),
+                                  prefixIcon: Icon(Icons.category),
+                                ),
+                                items: [
+                                  ..._categories.map((String category) {
+                                    return DropdownMenuItem<String>(
+                                      value: category,
+                                      child: Text(category, overflow: TextOverflow.ellipsis),
+                                    );
+                                  }).toList(),
+                                  const DropdownMenuItem<String>(
+                                    value: 'ADD_NEW_CATEGORY',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.add, size: 18, color: Colors.blue),
+                                        SizedBox(width: 8),
+                                        Text(
+                                          'Add New Category',
+                                          style: TextStyle(
+                                            color: Colors.blue,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                                onChanged: (String? newValue) async {
+                                  if (newValue == 'ADD_NEW_CATEGORY') {
+                                    await _showAddCategoryDialog(setDialogState);
+                                  } else if (newValue != null) {
+                                    setDialogState(() {
+                                      _selectedCategory = newValue;
+                                    });
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _sessionsController,
+                            decoration: const InputDecoration(
+                              labelText: 'Number of Sessions *',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.numbers),
+                            ),
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'Please enter number of sessions';
+                              }
+                              int? sessions = int.tryParse(value);
+                              if (sessions == null || sessions <= 0) {
+                                return 'Please enter a valid number of sessions';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _priceController,
+                            decoration: const InputDecoration(
+                              labelText: 'Price (\$) *',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.attach_money),
+                            ),
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
+                            ],
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'Please enter price';
+                              }
+                              double? price = double.tryParse(value);
+                              if (price == null || price <= 0) {
+                                return 'Please enter a valid price';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 16),
+                          DropdownButtonFormField<String>(
+                            value: _selectedStatus,
+                            isExpanded: true,
+                            decoration: const InputDecoration(
+                              labelText: 'Status *',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.toggle_on),
+                            ),
+                            items: _statusOptions.map((String status) {
+                              return DropdownMenuItem<String>(
+                                value: status,
+                                child: Text(status),
+                              );
+                            }).toList(),
+                            onChanged: (String? newValue) {
+                              setDialogState(() {
+                                _selectedStatus = newValue!;
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _descriptionController,
+                            decoration: const InputDecoration(
+                              labelText: 'Description',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.description),
+                            ),
+                            maxLines: 3,
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'Please enter description';
+                              }
+                              return null;
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        _clearForm();
+                      },
+                      child: const Text('Cancel'),
+                    ),
+                    ElevatedButton(
+                      onPressed: () {
+                        if (_formKey.currentState!.validate()) {
+                          _savePlan();
+                          Navigator.of(context).pop();
+                          _clearForm();
+                        }
+                      },
+                      child: Text(_editingIndex == -1 ? 'Add Plan' : 'Update Plan'),
+                    ),
+                  ],
                 ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                    _clearForm();
-                  },
-                  child: const Text('Cancel'),
-                ),
-                ElevatedButton(
-                  onPressed: () {
-                    if (_formKey.currentState!.validate()) {
-                      _savePlan();
-                      Navigator.of(context).pop();
-                      _clearForm();
-                    }
-                  },
-                  child: Text(_editingIndex == -1 ? 'Add Plan' : 'Update Plan'),
-                ),
-              ],
-            ),
-          ),
+            );
+          },
         );
       },
     );
@@ -553,7 +640,6 @@ class _PlansScreenState extends State<PlansScreen> {
                     return const Center(child: Text('No plans available'));
                   }
 
-                  // Sort monthly and bi-weekly plans by session count
                   List<Map<String, dynamic>> sorted = [];
                   final monthlyCats = [
                     'Semi Private Monthly Plans',
@@ -572,7 +658,6 @@ class _PlansScreenState extends State<PlansScreen> {
                       if (found.isNotEmpty) sorted.add(found.first);
                     }
                   }
-                  // Add the rest
                   sorted.addAll(_plans.where((p) =>
                       !monthlyCats.contains(p['category']) &&
                       p['status'] == 'Active'));

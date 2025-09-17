@@ -89,8 +89,8 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
       int slots = 0;
 
       // Fetch all client purchases for the year once
-      final yearStart = DateTime(selectedYear, 1, 1);
-      final yearEnd = DateTime(selectedYear + 1, 1, 1);
+      final yearStart = DateTime.utc(selectedYear, 1, 1);
+      final yearEnd = DateTime.utc(selectedYear + 1, 1, 1);
       final snapshot = await FirebaseFirestore.instance
           .collection('client_purchases')
           .where('purchaseDate', isGreaterThanOrEqualTo: yearStart)
@@ -192,8 +192,8 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
     for (var entry in monthMap.entries) {
       final monthName = entry.key;
       final monthIndex = entry.value;
-      final start = DateTime(reportYear, monthIndex, 1);
-      final end = monthIndex < 12 ? DateTime(reportYear, monthIndex + 1, 1) : DateTime(reportYear + 1, 1, 1);
+      final start = DateTime.utc(reportYear, monthIndex, 1);
+      final end = monthIndex < 12 ? DateTime.utc(reportYear, monthIndex + 1, 1) : DateTime.utc(reportYear + 1, 1, 1);
 
       final planSnapshot = await FirebaseFirestore.instance
           .collection('client_purchases')
@@ -269,7 +269,6 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
         final time = data['time'] ?? '';
         final trainerId = data['trainer_id'] ?? data['trainerId'] ?? '';
         final trainerName = data['trainer_name'] ?? 'Unknown Trainer';
-        final planName = data['plan_name'] ?? 'Unknown Plan';
         if (trainerId.isNotEmpty) yearTrainerIds.add(trainerId);
 
         final statusByUser = Map<String, dynamic>.from(data['status_by_user'] ?? {});
@@ -283,7 +282,6 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
             'clientId': clientId,
             'trainerId': trainerId,
             'trainer': trainerName,
-            'plan': planName,
             'status': status,
           });
           if (status.toLowerCase() != 'cancelled') {
@@ -376,6 +374,7 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
             cellStyle: const pw.TextStyle(fontSize: 20),
             cellAlignment: pw.Alignment.center,
             headerAlignment: pw.Alignment.center,
+            border: pw.TableBorder.all(color: PdfColors.black, width: 1),
             columnWidths: {
               0: const pw.FixedColumnWidth(100),
               1: const pw.FixedColumnWidth(100),
@@ -412,12 +411,9 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: topPlans.take(5).map((e) {
                 final originalName = categoryOriginal[e.key] ?? e.key;
-                return pw.Padding(
-                  padding: const pw.EdgeInsets.only(bottom: 10),
-                  child: pw.Text(
-                    "• $originalName: ${e.value} purchases",
-                    style: const pw.TextStyle(fontSize: 22),
-                  ),
+                return pw.Bullet(
+                  text: "$originalName: ${e.value} purchases",
+                  style: const pw.TextStyle(fontSize: 22),
                 );
               }).toList(),
             ),
@@ -443,6 +439,7 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
               cellStyle: const pw.TextStyle(fontSize: 18),
               cellAlignment: pw.Alignment.centerLeft,
               headerAlignment: pw.Alignment.centerLeft,
+              border: pw.TableBorder.all(color: PdfColors.black, width: 1),
               columnWidths: {
                 0: const pw.FlexColumnWidth(1),
                 1: const pw.FlexColumnWidth(2),
@@ -485,19 +482,19 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
             pw.Text("No data available.", style: const pw.TextStyle(fontSize: 22))
           else
             pw.Table.fromTextArray(
-              headers: ['Month', 'Date', 'Time', 'Client', 'Trainer', 'Plan', 'Status'],
+              headers: ['Month', 'Date', 'Time', 'Client', 'Trainer', 'Status'],
               headerStyle: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold),
               cellStyle: const pw.TextStyle(fontSize: 18),
               cellAlignment: pw.Alignment.centerLeft,
               headerAlignment: pw.Alignment.centerLeft,
+              border: pw.TableBorder.all(color: PdfColors.black, width: 1),
               columnWidths: {
                 0: const pw.FlexColumnWidth(1),
                 1: const pw.FlexColumnWidth(1),
                 2: const pw.FlexColumnWidth(1),
                 3: const pw.FlexColumnWidth(2),
                 4: const pw.FlexColumnWidth(2),
-                5: const pw.FlexColumnWidth(2),
-                6: const pw.FlexColumnWidth(1),
+                5: const pw.FlexColumnWidth(1),
               },
               data: yearSlotDetails.map((detail) {
                 return [
@@ -506,7 +503,6 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
                   detail['time'],
                   detail['client'],
                   detail['trainer'],
-                  detail['plan'],
                   detail['status'],
                 ];
               }).toList(),
@@ -537,11 +533,11 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.picture_as_pdf),
-            onPressed: _exportPdfReport,
+            onPressed: isLoading ? null : _exportPdfReport,
           ),
         ],
       ),
-      body: SingleChildScrollView(
+      body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
@@ -561,12 +557,12 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
                 ),
               ],
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
             GridView.count(
               crossAxisCount: 3,
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              childAspectRatio: 1.5,
+              childAspectRatio: 2.0,
               crossAxisSpacing: 12,
               mainAxisSpacing: 12,
               children: monthMap.keys.map((month) {
@@ -590,7 +586,7 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
                     child: Text(
                       month,
                       style: TextStyle(
-                        fontSize: 18,
+                        fontSize: 16,
                         color: selectedMonth == month ? Colors.white : textColor,
                         fontWeight: FontWeight.w600,
                       ),
@@ -599,7 +595,7 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
                 );
               }).toList(),
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 20),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -614,7 +610,7 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
                 Text(
                   "Select Year",
                   style: TextStyle(
-                    fontSize: 18,
+                    fontSize: 16,
                     color: textColor,
                     fontWeight: FontWeight.w600,
                   ),
@@ -629,7 +625,7 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 8),
             GestureDetector(
               onHorizontalDragEnd: (DragEndDetails details) {
                 double velocity = details.primaryVelocity ?? 0;
@@ -649,7 +645,7 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
                 crossAxisCount: 3,
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
-                childAspectRatio: 1.5,
+                childAspectRatio: 2.0,
                 crossAxisSpacing: 12,
                 mainAxisSpacing: 12,
                 children: List.generate(6, (index) {
@@ -678,7 +674,7 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
                       child: Text(
                         year.toString(),
                         style: TextStyle(
-                          fontSize: 18,
+                          fontSize: 16,
                           color: isSelected ? Colors.white : textColor,
                           fontWeight: FontWeight.w600,
                         ),
@@ -688,7 +684,7 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
                 }),
               ),
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 20),
             if (isLoading) const CircularProgressIndicator(),
           ],
         ),
@@ -718,7 +714,7 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
             Text(
               value,
               style: TextStyle(
-                fontSize: 24,
+                fontSize: 22,
                 fontWeight: FontWeight.bold,
                 color: color,
               ),
@@ -730,7 +726,7 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
             Text(
               title,
               style: TextStyle(
-                fontSize: 16,
+                fontSize: 14,
                 color: textColor.withOpacity(0.8),
                 fontWeight: FontWeight.w600,
               ),
@@ -747,8 +743,8 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
   void _navigateToMonthReport(String month) {
     final monthIndex = monthMap[month]!;
     final year = selectedYear;
-    final start = DateTime(year, monthIndex, 1);
-    final end = monthIndex < 12 ? DateTime(year, monthIndex + 1, 1) : DateTime(year + 1, 1, 1);
+    final start = DateTime.utc(year, monthIndex, 1);
+    final end = monthIndex < 12 ? DateTime.utc(year, monthIndex + 1, 1) : DateTime.utc(year + 1, 1, 1);
 
     Navigator.push(
       context,
@@ -918,7 +914,6 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
         final time = data['time'] ?? '';
         final trainerId = data['trainer_id'] ?? data['trainerId'] ?? '';
         final trainerName = data['trainer_name'] ?? 'Unknown Trainer';
-        final planName = data['plan_name'] ?? 'Unknown Plan';
         if (trainerId.isNotEmpty) trainerIds.add(trainerId);
 
         final statusByUser = Map<String, dynamic>.from(data['status_by_user'] ?? {});
@@ -935,7 +930,6 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
               'clientId': clientId,
               'trainerId': trainerId,
               'trainer': trainerName,
-              'plan': planName,
               'status': status,
             });
 
@@ -1063,6 +1057,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
               cellStyle: const pw.TextStyle(fontSize: 18),
               cellAlignment: pw.Alignment.centerLeft,
               headerAlignment: pw.Alignment.centerLeft,
+              border: pw.TableBorder.all(color: PdfColors.black, width: 1),
               columnWidths: {
                 0: const pw.FlexColumnWidth(2),
                 1: const pw.FlexColumnWidth(2),
@@ -1102,6 +1097,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
               cellStyle: const pw.TextStyle(fontSize: 18),
               cellAlignment: pw.Alignment.centerLeft,
               headerAlignment: pw.Alignment.centerLeft,
+              border: pw.TableBorder.all(color: PdfColors.black, width: 1),
               columnWidths: {
                 0: const pw.FlexColumnWidth(2),
                 1: const pw.FlexColumnWidth(2),
@@ -1140,18 +1136,18 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
             pw.Text("No slot bookings recorded", style: const pw.TextStyle(fontSize: 18))
           else
             pw.Table.fromTextArray(
-              headers: ['Date', 'Time', 'Client', 'Trainer', 'Plan', 'Status'],
+              headers: ['Date', 'Time', 'Client', 'Trainer', 'Status'],
               headerStyle: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold),
               cellStyle: const pw.TextStyle(fontSize: 18),
               cellAlignment: pw.Alignment.centerLeft,
               headerAlignment: pw.Alignment.centerLeft,
+              border: pw.TableBorder.all(color: PdfColors.black, width: 1),
               columnWidths: {
                 0: const pw.FlexColumnWidth(1),
                 1: const pw.FlexColumnWidth(1),
                 2: const pw.FlexColumnWidth(2),
                 3: const pw.FlexColumnWidth(2),
-                4: const pw.FlexColumnWidth(2),
-                5: const pw.FlexColumnWidth(1),
+                4: const pw.FlexColumnWidth(1),
               },
               data: slotDetails.map((detail) {
                 return [
@@ -1159,7 +1155,6 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                   detail['time'],
                   detail['client'],
                   detail['trainer'],
-                  detail['plan'],
                   detail['status'],
                 ];
               }).toList(),
@@ -1336,7 +1331,6 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                           children: [
                             Text("Trainer: ${detail['trainer']}", style: const TextStyle(fontSize: 16)),
                             Text("Time: ${detail['time']}", style: const TextStyle(fontSize: 16)),
-                            Text("Plan: ${detail['plan']}", style: const TextStyle(fontSize: 16)),
                             Text(
                               "Status: ${detail['status']}",
                               style: TextStyle(
@@ -1372,7 +1366,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.picture_as_pdf),
-            onPressed: _exportMonthlyPdf,
+            onPressed: loading ? null : _exportMonthlyPdf,
           ),
         ],
       ),
@@ -1399,7 +1393,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
       onTap: onTap,
       child: Container(
         width: double.infinity,
-        height: 120,
+        height: 100,
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
@@ -1419,7 +1413,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
               Text(
                 value,
                 style: TextStyle(
-                  fontSize: 24,
+                  fontSize: 22,
                   fontWeight: FontWeight.bold,
                   color: color,
                 ),
@@ -1431,7 +1425,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
               Text(
                 label,
                 style: TextStyle(
-                  fontSize: 16,
+                  fontSize: 14,
                   color: widget.textColor.withOpacity(0.8),
                   fontWeight: FontWeight.w600,
                 ),
