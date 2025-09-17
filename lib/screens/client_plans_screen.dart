@@ -4,6 +4,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'square_checkout.dart';
 import 'invoice_review_page.dart'; // adjust the path if needed
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:open_file/open_file.dart';
 
 class ClientPlansScreen extends StatefulWidget {
   const ClientPlansScreen({super.key});
@@ -19,6 +24,7 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
   final Set<String> _completedKeys = {};
   List<Map<String, dynamic>> _myActivePlans = [];
   String? _errorMessage;
+  bool _canExportPDF = false;
 
   // Square payment configuration
   static const String _squareApplicationId = 'sandbox-sq0idb-b_5NuSv1kYCZWkITbVqS4w';
@@ -176,6 +182,7 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
         _loadPurchasedPlans(),
         _loadMyActivePlans(),
       ]);
+      _updateCanExportPDF();
     } catch (e) {
       print('Error initializing data: $e');
       setState(() {
@@ -298,6 +305,7 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
 
       await _loadPurchasedPlans();
       await _loadMyActivePlans();
+      _updateCanExportPDF();
       _showSnackBar('Payment successful! Plan purchased.', Colors.green);
     } catch (e) {
       print('Error completing purchase: $e');
@@ -355,6 +363,7 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
 
         await _loadPurchasedPlans();
         await _loadMyActivePlans();
+        _updateCanExportPDF();
         print('Plan "$planName" cancelled, refreshed purchased and active plans');
         _showSnackBar('Plan "$planName" cancelled successfully!', Colors.green);
       }
@@ -392,6 +401,7 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
 
       await _loadPurchasedPlans();
       await _loadMyActivePlans();
+      _updateCanExportPDF();
     } catch (e) {
       print('Error updating session: $e');
       _showSnackBar('Error updating session: $e', Colors.red);
@@ -802,6 +812,93 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
     );
   }
 
+  void _updateCanExportPDF() {
+    final now = DateTime.now();
+    bool can = false;
+    for (var p in _myActivePlans) {
+      if (p['isActive'] == true) {
+        final pd = (p['purchaseDate'] as Timestamp?)?.toDate();
+        if (pd != null && now.difference(pd).inDays <= 30) {
+          can = true;
+          break;
+        }
+      }
+    }
+    setState(() {
+      _canExportPDF = can;
+    });
+  }
+
+  Future<void> _exportPDF() async {
+    final now = DateTime.now();
+    final exportPlans = _myActivePlans.where((p) {
+      if (p['isActive'] != true) return false;
+      final pd = (p['purchaseDate'] as Timestamp?)?.toDate();
+      if (pd == null) return false;
+      return now.difference(pd).inDays <= 30;
+    }).toList();
+
+    if (exportPlans.isEmpty) {
+      _showSnackBar('No plans available for export', Colors.orange);
+      return;
+    }
+
+    final pdf = pw.Document();
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        build: (pw.Context context) => [
+          pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text('Purchased Plans Details',
+                  style: pw.TextStyle(fontSize: 28, fontWeight: pw.FontWeight.bold)),
+              pw.SizedBox(height: 20),
+              for (var plan in exportPlans)
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text('Plan Name: ${plan['planName']}',
+                        style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold)),
+                    pw.Text('Category: ${plan['planCategory'] ?? 'N/A'}',
+                        style: const pw.TextStyle(fontSize: 18)),
+                    pw.Text('Price: \$${plan['price'].toStringAsFixed(2)}',
+                        style: const pw.TextStyle(fontSize: 18)),
+                    pw.Text('Total Sessions: ${plan['totalSessions']}',
+                        style: const pw.TextStyle(fontSize: 18)),
+                    pw.Text('Remaining Sessions: ${plan['remainingSessions']}',
+                        style: const pw.TextStyle(fontSize: 18)),
+                    pw.Text('Used Sessions: ${plan['usedSessions']}',
+                        style: const pw.TextStyle(fontSize: 18)),
+                    pw.Text(
+                        'Purchase Date: ${(plan['purchaseDate'] as Timestamp).toDate().toLocal().toString()}',
+                        style: const pw.TextStyle(fontSize: 18)),
+                    pw.Text('Description: ${plan['description'] ?? 'N/A'}',
+                        style: const pw.TextStyle(fontSize: 18)),
+                    pw.SizedBox(height: 20),
+                  ],
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+
+    final dir = await getTemporaryDirectory();
+    final filePath = '${dir.path}/purchased_plans.pdf';
+    final file = File(filePath);
+    await file.writeAsBytes(await pdf.save());
+
+    try {
+      final result = await OpenFile.open(filePath);
+      if (result.type != ResultType.done) {
+        _showSnackBar('Could not open PDF: ${result.message}', Colors.red);
+      }
+    } catch (e) {
+      _showSnackBar('Error opening PDF: $e', Colors.red);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -817,6 +914,14 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
         backgroundColor: const Color(0xFF1C2D5E),
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
+        actions: [
+          if (_canExportPDF && !_isLoading)
+            IconButton(
+              icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
+              onPressed: _exportPDF,
+              tooltip: 'Export PDF',
+            ),
+        ],
       ),
       body: _errorMessage != null
           ? _buildErrorWidget(_errorMessage!)
@@ -835,6 +940,7 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
                   onRefresh: () async {
                     await _loadPurchasedPlans();
                     await _loadMyActivePlans();
+                    _updateCanExportPDF();
                   },
                   child: ListView(
                     padding: const EdgeInsets.all(16),

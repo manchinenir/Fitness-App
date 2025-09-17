@@ -20,6 +20,7 @@ dependencies:
   share_plus: ^7.2.1
   csv: ^5.0.1
   path_provider: ^2.0.11
+  open_file: ^3.5.10  # Added this for opening files (e.g., PDFs)
 
   # Firebase core packages (latest compatible set)
   firebase_core: ^3.13.1
@@ -70,4 +71,3 @@ flutter_icons:
   android: true
   ios: true
   image_path: "assets/icons/app_icon.png"
-  

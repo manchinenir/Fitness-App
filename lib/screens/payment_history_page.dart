@@ -11,8 +11,9 @@ class PaymentHistoryPage extends StatelessWidget {
   String _fmtMoney(num? v) => '\$${(v ?? 0).toDouble().toStringAsFixed(2)}';
   String _fmtDate(dynamic v) {
     DateTime d;
-    if (v is Timestamp) d = v.toDate();
-    else if (v is DateTime) d = v;
+    if (v is Timestamp) {
+      d = v.toDate();
+    } else if (v is DateTime) d = v;
     else d = DateTime.tryParse(v?.toString() ?? '') ?? DateTime.now();
     return DateFormat('dd MMM yyyy • h:mm a').format(d);
   }
