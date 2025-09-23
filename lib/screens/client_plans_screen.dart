@@ -31,134 +31,6 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
   static const String _squareLocationId = 'LPSE4AB75KF7G';
   bool _isProcessingPayment = false;
 
-  // Hardcoded plans with all specified categories
-  static final List<Map<String, dynamic>> _allPlans = [
-    // Semi Private Monthly Plans
-    {
-      'docId': 'sp_monthly_4',
-      'name': 'Semi Private Monthly (4 Sessions)',
-      'category': 'Semi Private Monthly Plans',
-      'sessions': 4,
-      'price': 185.0,
-      'description': '4 sessions per month',
-      'status': 'active',
-    },
-    {
-      'docId': 'sp_monthly_8',
-      'name': 'Semi Private Monthly (8 Sessions)',
-      'category': 'Semi Private Monthly Plans',
-      'sessions': 8,
-      'price': 375.0,
-      'description': '8 sessions per month',
-      'status': 'active',
-    },
-    {
-      'docId': 'sp_monthly_12',
-      'name': 'Semi Private Monthly (12 Sessions)',
-      'category': 'Semi Private Monthly Plans',
-      'sessions': 12,
-      'price': 500.0,
-      'description': '12 sessions per month',
-      'status': 'active',
-    },
-    {
-      'docId': 'sp_monthly_16',
-      'name': 'Semi Private Monthly (16 Sessions)',
-      'category': 'Semi Private Monthly Plans',
-      'sessions': 16,
-      'price': 600.0,
-      'description': '16 sessions per month',
-      'status': 'active',
-    },
-    // Semi Private Bi Weekly Plans
-    {
-      'docId': 'sp_biweekly_4',
-      'name': 'Semi Private Bi Weekly (4 Sessions)',
-      'category': 'Semi Private Bi Weekly Plans',
-      'sessions': 4,
-      'price': 94.0,
-      'description': '4 sessions per month',
-      'status': 'active',
-    },
-    {
-      'docId': 'sp_biweekly_8',
-      'name': 'Semi Private Bi Weekly (8 Sessions)',
-      'category': 'Semi Private Bi Weekly Plans',
-      'sessions': 8,
-      'price': 187.0,
-      'description': '8 sessions per month',
-      'status': 'active',
-    },
-    {
-      'docId': 'sp_biweekly_12',
-      'name': 'Semi Private Bi Weekly (12 Sessions)',
-      'category': 'Semi Private Bi Weekly Plans',
-      'sessions': 12,
-      'price': 260.0,
-      'description': '12 sessions per month',
-      'status': 'active',
-    },
-    {
-      'docId': 'sp_biweekly_16',
-      'name': 'Semi Private Bi Weekly (16 Sessions)',
-      'category': 'Semi Private Bi Weekly Plans',
-      'sessions': 16,
-      'price': 310.0,
-      'description': '16 sessions per month',
-      'status': 'active',
-    },
-    // Semi Private Day Pass
-    {
-      'docId': 'sp_day_pass',
-      'name': 'Semi Private Day Pass',
-      'category': 'Semi Private Day Pass',
-      'sessions': 1,
-      'price': 40.0,
-      'description': 'One-day access',
-      'status': 'active',
-    },
-    // Group Training or Class
-    {
-      'docId': 'group_training',
-      'name': 'Group Training or Class',
-      'category': 'Group Training or Class',
-      'sessions': 1,
-      'price': 25.0,
-      'description': 'Single group training session or class',
-      'status': 'active',
-    },
-    // Strength & Agility Session (High School Athlete)
-    {
-      'docId': 'strength_agility_hs',
-      'name': 'Strength & Agility (High School Athlete)',
-      'category': 'Strength & Agility Session (High School Athlete)',
-      'sessions': 1,
-      'price': 25.0,
-      'description': 'Strength and agility session for high school athletes',
-      'status': 'active',
-    },
-    // Strength & Agility Session (Kids)
-    {
-      'docId': 'strength_agility_kids',
-      'name': 'Strength & Agility (Kids)',
-      'category': 'Strength & Agility Session (Kids)',
-      'sessions': 1,
-      'price': 25.0,
-      'description': 'Strength and agility session for kids',
-      'status': 'active',
-    },
-    // Athletic Performance (Adult)
-    {
-      'docId': 'athletic_adult',
-      'name': 'Athletic Performance (Adult)',
-      'category': 'Athletic Performance (Adult)',
-      'sessions': 1,
-      'price': 25.0,
-      'description': 'Athletic performance session for adults',
-      'status': 'active',
-    },
-  ];
-
   @override
   void initState() {
     super.initState();
@@ -623,159 +495,165 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
       elevation: 3,
       margin: const EdgeInsets.only(bottom: 12, left: 8, right: 8),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          gradient: LinearGradient(
-            colors: [Colors.white, Colors.grey.withOpacity(0.05)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+      color: isActive ? Colors.white : Colors.grey[200], // Grey background for inactive plans
+      child: Opacity(
+        opacity: isActive ? 1.0 : 0.6, // Reduce opacity for inactive plans
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            gradient: LinearGradient(
+              colors: isActive
+                  ? [Colors.white, Colors.grey.withOpacity(0.05)]
+                  : [Colors.grey[300]!, Colors.grey[400]!], // Grey gradient for inactive
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
           ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '$sessions sessions',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.orange,
-                      fontSize: 16,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '\$${price.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
-                      color: Colors.green,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: isPurchased
-                          ? Colors.green.withOpacity(0.1)
-                          : Colors.grey.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: isPurchased
-                            ? Colors.green.withOpacity(0.3)
-                            : Colors.grey.withOpacity(0.3),
-                      ),
-                    ),
-                    child: Text(
-                      isPurchased ? "Active" : "Inactive",
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '$sessions sessions',
                       style: TextStyle(
-                        fontSize: 12,
                         fontWeight: FontWeight.bold,
-                        color: isPurchased ? Colors.green : Colors.grey,
+                        color: isActive ? Colors.orange : Colors.grey[600],
+                        fontSize: 16,
                       ),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Text(
-                planCategory,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Colors.grey[600],
-                  fontStyle: FontStyle.italic,
+                    const SizedBox(height: 4),
+                    Text(
+                      '\$${price.toStringAsFixed(2)}',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                        color: isActive ? Colors.green : Colors.grey[600],
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: isPurchased
+                            ? Colors.green.withOpacity(0.1)
+                            : Colors.grey.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isPurchased
+                              ? Colors.green.withOpacity(0.3)
+                              : Colors.grey.withOpacity(0.3),
+                        ),
+                      ),
+                      child: Text(
+                        isPurchased ? "Active" : "Inactive",
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: isPurchased ? Colors.green : Colors.grey,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-              const SizedBox(height: 8),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.grey[50],
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  description,
-                  style: const TextStyle(
+                const SizedBox(height: 12),
+                Text(
+                  planCategory,
+                  style: TextStyle(
                     fontSize: 13,
-                    color: Colors.grey,
-                    height: 1.3,
+                    color: isActive ? Colors.grey[600] : Colors.grey[500],
+                    fontStyle: FontStyle.italic,
                   ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              if (!isPurchased)
-                SizedBox(
+                const SizedBox(height: 8),
+                Container(
                   width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: (!isActive || _isLoading || _isProcessingPayment)
-                        ? null
-                        : () => _purchasePlan(plan),
-                    icon: (_isLoading || _isProcessingPayment)
-                        ? const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(FontAwesomeIcons.cartPlus, size: 14),
-                    label: Text(
-                      (_isLoading || _isProcessingPayment)
-                          ? 'Processing...'
-                          : isActive
-                              ? 'Purchase Plan'
-                              : 'Plan Inactive',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: isActive ? Colors.blueAccent : Colors.grey,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                    ),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[50],
+                    borderRadius: BorderRadius.circular(6),
                   ),
-                )
-              else
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: (_isLoading || purchaseDocId == null)
-                        ? null
-                        : () => _cancelPlan(purchaseDocId!, planName),
-                    icon: _isLoading
-                        ? const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.cancel, size: 16),
-                    label: Text(
-                      _isLoading ? 'Processing...' : 'Cancel Plan',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(6),
-                      ),
+                  child: Text(
+                    description,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: isActive ? Colors.grey : Colors.grey[500],
+                      height: 1.3,
                     ),
                   ),
                 ),
-            ],
+                const SizedBox(height: 12),
+                if (!isPurchased)
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: (!isActive || _isLoading || _isProcessingPayment)
+                          ? null
+                          : () => _purchasePlan(plan),
+                      icon: (_isLoading || _isProcessingPayment)
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(FontAwesomeIcons.cartPlus, size: 14),
+                      label: Text(
+                        (_isLoading || _isProcessingPayment)
+                            ? 'Processing...'
+                            : isActive
+                                ? 'Purchase Plan'
+                                : 'Plan Inactive',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: isActive ? Colors.blueAccent : Colors.grey[400],
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: (_isLoading || purchaseDocId == null)
+                          ? null
+                          : () => _cancelPlan(purchaseDocId!, planName),
+                      icon: _isLoading
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.cancel, size: 16),
+                      label: Text(
+                        _isLoading ? 'Processing...' : 'Cancel Plan',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -843,6 +721,44 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
       return;
     }
 
+    final userId = _auth.currentUser?.uid;
+    if (userId == null) {
+      _showSnackBar('User not logged in', Colors.red);
+      return;
+    }
+
+    // Fetch purchased plans from plans collection
+    final purchasedPlanIds = exportPlans.map((p) => p['planId'] as String).toList();
+    final planSnapshot = await _firestore
+        .collection('plans')
+        .where(FieldPath.documentId, whereIn: purchasedPlanIds)
+        .get();
+    final List<Map<String, dynamic>> purchasedPlans = planSnapshot.docs.map((doc) {
+      Map<String, dynamic> data = doc.data();
+      data['docId'] = doc.id;
+      return data;
+    }).toList();
+
+    // Fetch workouts from users/{userId}/workouts
+    final workoutSnapshot = await _firestore
+        .collection('users')
+        .doc(userId)
+        .collection('workouts')
+        .where('assigned_at', isGreaterThan: Timestamp(0, 0))
+        .get();
+    final List<Map<String, dynamic>> userWorkouts = workoutSnapshot.docs.map((doc) {
+      Map<String, dynamic> data = doc.data();
+      data['docId'] = doc.id;
+      return data;
+    }).toList();
+
+    userWorkouts.sort((a, b) {
+      final tsA = a['assigned_at'] as Timestamp?;
+      final tsB = b['assigned_at'] as Timestamp?;
+      if (tsA == null || tsB == null) return 0;
+      return tsB.compareTo(tsA);
+    });
+
     final pdf = pw.Document();
     pdf.addPage(
       pw.MultiPage(
@@ -854,27 +770,63 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
               pw.Text('Purchased Plans Details',
                   style: pw.TextStyle(fontSize: 28, fontWeight: pw.FontWeight.bold)),
               pw.SizedBox(height: 20),
-              for (var plan in exportPlans)
+              for (var plan in purchasedPlans)
                 pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
-                    pw.Text('Plan Name: ${plan['planName']}',
-                        style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold)),
-                    pw.Text('Category: ${plan['planCategory'] ?? 'N/A'}',
-                        style: const pw.TextStyle(fontSize: 18)),
-                    pw.Text('Price: \$${plan['price'].toStringAsFixed(2)}',
-                        style: const pw.TextStyle(fontSize: 18)),
-                    pw.Text('Total Sessions: ${plan['totalSessions']}',
-                        style: const pw.TextStyle(fontSize: 18)),
-                    pw.Text('Remaining Sessions: ${plan['remainingSessions']}',
-                        style: const pw.TextStyle(fontSize: 18)),
-                    pw.Text('Used Sessions: ${plan['usedSessions']}',
-                        style: const pw.TextStyle(fontSize: 18)),
-                    pw.Text(
-                        'Purchase Date: ${(plan['purchaseDate'] as Timestamp).toDate().toLocal().toString()}',
-                        style: const pw.TextStyle(fontSize: 18)),
-                    pw.Text('Description: ${plan['description'] ?? 'N/A'}',
-                        style: const pw.TextStyle(fontSize: 18)),
+                    if (plan['name'] != null)
+                      pw.Text('Plan Name: ${plan['name']}',
+                          style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
+                    if (plan['category'] != null)
+                      pw.Text('Category: ${plan['category']}',
+                          style: pw.TextStyle(fontSize: 18)),
+                    if (plan['price'] != null)
+                      pw.Text('Price: \$${plan['price'].toStringAsFixed(2)}',
+                          style: pw.TextStyle(fontSize: 18)),
+                    if (plan['sessions'] != null)
+                      pw.Text('Sessions: ${plan['sessions']}',
+                          style: pw.TextStyle(fontSize: 18)),
+                    if (plan['description'] != null)
+                      pw.Text('Description: ${plan['description']}',
+                          style: pw.TextStyle(fontSize: 18)),
+                    pw.SizedBox(height: 20),
+                  ],
+                ),
+              pw.SizedBox(height: 40),
+              pw.Text('My Workouts',
+                  style: pw.TextStyle(fontSize: 28, fontWeight: pw.FontWeight.bold)),
+              pw.SizedBox(height: 20),
+              for (var workout in userWorkouts)
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    if (workout['title'] != null)
+                      pw.Text('Title: ${workout['title']}',
+                          style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
+                    if (workout['assigned_at'] != null)
+                      pw.Text('Assigned At: ${(workout['assigned_at'] as Timestamp).toDate().toLocal().toString()}',
+                          style: pw.TextStyle(fontSize: 18)),
+                    if (workout['trainer'] != null)
+                      pw.Text('Trainer: ${workout['trainer']}',
+                          style: pw.TextStyle(fontSize: 18)),
+                    if (workout['rating'] != null)
+                      pw.Text('Rating: ${workout['rating']}',
+                          style: pw.TextStyle(fontSize: 18)),
+                    if (workout['workouts'] != null)
+                      pw.Text('Workouts:',
+                          style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
+                    if (workout['workouts'] != null)
+                      ...((workout['workouts'] as Map<String, dynamic>).entries).map((entry) {
+                        return pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          children: [
+                            pw.Text('${entry.key.toUpperCase()}:',
+                                style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+                            ...(entry.value as List).map((exercise) => pw.Text('  - $exercise',
+                                style: pw.TextStyle(fontSize: 16))).toList(),
+                          ],
+                        );
+                      }).toList(),
                     pw.SizedBox(height: 20),
                   ],
                 ),
@@ -931,7 +883,7 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       CircularProgressIndicator(),
-                      SizedBox(height: 16),
+                      SizedBox(height: 18),
                       Text('Loading plans...'),
                     ],
                   ),
@@ -942,55 +894,90 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> {
                     await _loadMyActivePlans();
                     _updateCanExportPDF();
                   },
-                  child: ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      // Group and sort plans
-                      ...(() {
-                        final Map<String, List<Map<String, dynamic>>> groupedPlans = {};
-                        for (final plan in _allPlans) {
-                          final category = plan['category'] as String;
-                          if (!groupedPlans.containsKey(category)) {
-                            groupedPlans[category] = [];
-                          }
-                          groupedPlans[category]!.add(plan);
-                        }
-                        groupedPlans.forEach((category, plans) {
-                          plans.sort((a, b) {
-                            final sa = a['sessions'] as int? ?? 0;
-                            final sb = b['sessions'] as int? ?? 0;
-                            return sa.compareTo(sb);
-                          });
-                        });
-                        // Define the desired category order
-                        const categoryOrder = [
-                          'Semi Private Monthly Plans',
-                          'Semi Private Bi Weekly Plans',
-                          'Semi Private Day Pass',
-                          'Group Training or Class',
-                          'Strength & Agility Session (High School Athlete)',
-                          'Strength & Agility Session (Kids)',
-                          'Athletic Performance (Adult)',
-                        ];
-                        // Sort categories based on the order
-                        final sortedCategories = groupedPlans.keys.toList()
-                          ..sort((a, b) {
-                            final indexA = categoryOrder.indexOf(a);
-                            final indexB = categoryOrder.indexOf(b);
-                            return indexA.compareTo(indexB);
-                          });
-                        return sortedCategories.map((category) {
-                          final categoryPlans = groupedPlans[category]!;
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _buildCategoryHeader(category, categoryPlans.length),
-                              ...categoryPlans.map((plan) => _buildPlanCard(plan)),
-                            ],
-                          );
-                        }).toList();
-                      })(),
-                    ],
+                  child: StreamBuilder<QuerySnapshot>(
+                    stream: _firestore.collection('plans').snapshots(),
+                    builder: (context, snapshot) {
+                      if (snapshot.hasError) {
+                        return SingleChildScrollView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          child: _buildErrorWidget(snapshot.error.toString()),
+                        );
+                      }
+
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const SingleChildScrollView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          child: Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                CircularProgressIndicator(),
+                                SizedBox(height: 18),
+                                Text('Loading plans...'),
+                              ],
+                            ),
+                          ),
+                        );
+                      }
+
+                      final List<Map<String, dynamic>> allPlans = snapshot.data!.docs.map((doc) {
+                        Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+                        data['docId'] = doc.id;
+                        return data;
+                      }).toList();
+
+                      return ListView(
+                        padding: const EdgeInsets.all(16),
+                        children: [
+                          ...(() {
+                            final Map<String, List<Map<String, dynamic>>> groupedPlans = {};
+                            for (final plan in allPlans) {
+                              final category = plan['category'] as String? ?? 'Uncategorized';
+                              if (!groupedPlans.containsKey(category)) {
+                                groupedPlans[category] = [];
+                              }
+                              groupedPlans[category]!.add(plan);
+                            }
+                            groupedPlans.forEach((category, plans) {
+                              plans.sort((a, b) {
+                                final sa = a['sessions'] as int? ?? 0;
+                                final sb = b['sessions'] as int? ?? 0;
+                                return sa.compareTo(sb);
+                              });
+                            });
+                            // Define the desired category order
+                            const categoryOrder = [
+                              'Semi Private Monthly Plans',
+                              'Semi Private Bi Weekly Plans',
+                              'Semi Private Day Pass',
+                              'Group Training or Class',
+                              'Strength & Agility Session (High School Athlete)',
+                              'Strength & Agility Session (Kids)',
+                              'Athletic Performance (Adult)',
+                            ];
+                            // Sort categories based on the order
+                            final sortedCategories = groupedPlans.keys.toList()
+                              ..sort((a, b) {
+                                int indexA = categoryOrder.indexOf(a);
+                                int indexB = categoryOrder.indexOf(b);
+                                if (indexA == -1) indexA = categoryOrder.length;
+                                if (indexB == -1) indexB = categoryOrder.length;
+                                return indexA.compareTo(indexB);
+                              });
+                            return sortedCategories.map((category) {
+                              final categoryPlans = groupedPlans[category]!;
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  _buildCategoryHeader(category, categoryPlans.length),
+                                  ...categoryPlans.map((plan) => _buildPlanCard(plan)),
+                                ],
+                              );
+                            }).toList();
+                          })(),
+                        ],
+                      );
+                    },
                   ),
                 ),
     );
@@ -1063,25 +1050,26 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
       });
     }
   }
-Future<void> _openInvoicePage() async {
-  final result = await Navigator.push(
-    context,
-    MaterialPageRoute(
-      builder: (_) => InvoiceReviewPage(
-        plan: widget.plan,
-        squareApplicationId: widget.squareApplicationId,
-        squareLocationId: widget.squareLocationId,
-        functionsBaseUrl: 'https://us-central1-flex-facility-app-b55aa.cloudfunctions.net/api',
-      ),
-    ),
-  );
 
-  if (!mounted) return;
-  if (result == true) {
-    // The invoice flow reported success → bubble it up
-    Navigator.of(context).pop(true);
+  Future<void> _openInvoicePage() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => InvoiceReviewPage(
+          plan: widget.plan,
+          squareApplicationId: widget.squareApplicationId,
+          squareLocationId: widget.squareLocationId,
+          functionsBaseUrl: 'https://us-central1-flex-facility-app-b55aa.cloudfunctions.net/api',
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+    if (result == true) {
+      // The invoice flow reported success → bubble it up
+      Navigator.of(context).pop(true);
+    }
   }
-}
 
   @override
   Widget build(BuildContext context) {
@@ -1169,26 +1157,25 @@ Future<void> _openInvoicePage() async {
                 contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               ),
             ),
-
             Card(
-  elevation: 2,
-  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-  child: ListTile(
-    leading: Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: Colors.blue.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: const Icon(Icons.receipt_long, color: Colors.blue),
-    ),
-    title: const Text('Invoice', style: TextStyle(fontWeight: FontWeight.bold)),
-    subtitle: const Text('Open Square hosted invoice'),
-    trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-    onTap: _isProcessingPayment ? null : _openInvoicePage,
-    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-  ),
-),
+              elevation: 2,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.receipt_long, color: Colors.blue),
+                ),
+                title: const Text('Invoice', style: TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: const Text('Open Square hosted invoice'),
+                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                onTap: _isProcessingPayment ? null : _openInvoicePage,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              ),
+            ),
             if (_errorMessage != null) ...[
               const SizedBox(height: 16),
               Container(
