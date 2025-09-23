@@ -26,8 +26,50 @@ class _SignupPageState extends State<SignupPage> {
 
   final Color navyBlue = const Color(0xFF1C2D5E);
 
+  // Predefined admin credentials
+  final List<Map<String, String>> allowedAdmins = [
+    {
+      'name': 'Kenny Sims',
+      'phone': '+1(314)-910-2203',
+      'email': 'Kenny@flextraining.co',
+      'password': '123456',
+    },
+    {
+      'name': 'Sridhar',
+      'phone': '+1(314)585-3317',
+      'email': 'sridharkota17@gmail.com',
+      'password': '123456',
+    },
+  ];
+
+  // Validate if entered credentials match allowed admins
+  bool _isValidAdmin() {
+    final enteredName = nameController.text.trim();
+    final enteredPhone = phoneController.text.trim();
+    final enteredEmail = emailController.text.trim();
+    final enteredPassword = passwordController.text.trim();
+
+    for (var admin in allowedAdmins) {
+      if (admin['name'] == enteredName &&
+          admin['phone'] == enteredPhone &&
+          admin['email'] == enteredEmail &&
+          admin['password'] == enteredPassword) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   Future<void> _signup() async {
     if (!_formKey.currentState!.validate()) return;
+
+    // Check if the entered credentials match allowed admins
+    if (!_isValidAdmin()) {
+      setState(() {
+        errorMessage = 'Only authorized admins can sign up.';
+      });
+      return;
+    }
 
     setState(() {
       isLoading = true;
@@ -60,8 +102,8 @@ class _SignupPageState extends State<SignupPage> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Account created! Please verify your email.'),
+          const SnackBar(
+            content: Text('Account created! Please verify your email.'),
             backgroundColor: Colors.green,
             behavior: SnackBarBehavior.floating,
           ),
@@ -103,11 +145,10 @@ class _SignupPageState extends State<SignupPage> {
           child: Column(
             children: [
               const SizedBox(height: 20),
-               Image.asset(
-                'assets/images/logo.webp', // <-- modified path
-                height: 150, // <-- modified height
+              Image.asset(
+                'assets/images/logo.webp',
+                height: 150,
               ),
-              
               const SizedBox(height: 4),
               Text(
                 "FLEX FACILITY ADMIN",

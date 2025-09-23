@@ -12,7 +12,6 @@ class PlansScreen extends StatefulWidget {
 class _PlansScreenState extends State<PlansScreen> {
   final _formKey = GlobalKey<FormState>();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
   final _nameController = TextEditingController();
   final _priceController = TextEditingController();
   final _sessionsController = TextEditingController();
@@ -21,10 +20,8 @@ class _PlansScreenState extends State<PlansScreen> {
 
   String _selectedCategory = 'Semi Private Monthly Plans';
   String _selectedStatus = 'Active';
-
   int _editingIndex = -1;
   String? _editingDocId;
-
   List<Map<String, dynamic>> _plans = [];
 
   final List<String> _categories = [
@@ -38,7 +35,6 @@ class _PlansScreenState extends State<PlansScreen> {
   ];
 
   final List<String> _statusOptions = ['Active', 'Inactive'];
-
   int? _expandedPlanIndex;
 
   @override
@@ -169,12 +165,14 @@ class _PlansScreenState extends State<PlansScreen> {
         },
       ];
 
-      WriteBatch batch = _firestore.batch();
       final colRef = _firestore.collection('plans');
       final existing = await colRef.get();
-      for (var doc in existing.docs) {
-        batch.delete(doc.reference);
+      if (existing.docs.isNotEmpty) {
+        print('Plans already exist, skipping initial load');
+        return;
       }
+
+      WriteBatch batch = _firestore.batch();
       for (var plan in initialPlans) {
         batch.set(colRef.doc(), plan);
       }
@@ -621,7 +619,7 @@ class _PlansScreenState extends State<PlansScreen> {
             const SizedBox(height: 8),
             Expanded(
               child: StreamBuilder<QuerySnapshot>(
-                stream: _firestore.collection('plans').snapshots(),
+                stream: _firestore.collection('plans').orderBy('createdAt', descending: false).snapshots(),
                 builder: (ctx, snap) {
                   if (snap.hasError) {
                     return Center(child: Text('Error: ${snap.error}'));
@@ -629,6 +627,7 @@ class _PlansScreenState extends State<PlansScreen> {
                   if (snap.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
                   }
+
                   final docs = snap.data!.docs;
                   _plans = docs.map((d) {
                     final m = d.data()! as Map<String, dynamic>;
@@ -640,40 +639,47 @@ class _PlansScreenState extends State<PlansScreen> {
                     return const Center(child: Text('No plans available'));
                   }
 
-                  List<Map<String, dynamic>> sorted = [];
-                  final monthlyCats = [
-                    'Semi Private Monthly Plans',
-                    'Semi Private Bi Weekly Plans'
-                  ];
-                  final order = [4, 8, 12, 16];
-
-                  for (var cat in monthlyCats) {
-                    final group = _plans
-                        .where((p) =>
-                            p['category'] == cat && p['status'] == 'Active')
-                        .toList();
-                    for (var s in order) {
-                      final found =
-                          group.where((p) => p['sessions'] == s).toList();
-                      if (found.isNotEmpty) sorted.add(found.first);
+                  // Sort by category index first, then by sessions, then by createdAt
+                  _plans.sort((a, b) {
+                    // First priority: category index comparison
+                    int catIndexA = _categories.indexOf(a['category']);
+                    if (catIndexA == -1) catIndexA = _categories.length;
+                    int catIndexB = _categories.indexOf(b['category']);
+                    if (catIndexB == -1) catIndexB = _categories.length;
+                    int catCompare = catIndexA.compareTo(catIndexB);
+                    if (catCompare != 0) return catCompare;
+                    
+                    // Second priority: sessions comparison within same category
+                    int sessionsCompare = (a['sessions'] as int).compareTo(b['sessions'] as int);
+                    if (sessionsCompare != 0) return sessionsCompare;
+                    
+                    // Third priority: creation time (newly added plans at bottom)
+                    var aCreated = a['createdAt'];
+                    var bCreated = b['createdAt'];
+                    
+                    if (aCreated != null && bCreated != null) {
+                      if (aCreated is Timestamp && bCreated is Timestamp) {
+                        return aCreated.compareTo(bCreated);
+                      }
                     }
-                  }
-                  sorted.addAll(_plans.where((p) =>
-                      !monthlyCats.contains(p['category']) &&
-                      p['status'] == 'Active'));
+                    return 0;
+                  });
 
                   return ListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: sorted.length,
+                    itemCount: _plans.length,
                     itemBuilder: (c, i) {
-                      final plan = sorted[i];
+                      final plan = _plans[i];
                       final expanded = _expandedPlanIndex == i;
+                      final isActive = plan['status'] == 'Active';
+
                       return Container(
                         width: double.infinity,
                         margin: const EdgeInsets.only(bottom: 12),
                         child: Card(
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12)),
+                          elevation: 2,
                           child: InkWell(
                             onTap: () => setState(
                                 () => _expandedPlanIndex = expanded ? null : i),
@@ -689,10 +695,48 @@ class _PlansScreenState extends State<PlansScreen> {
                                         child: Text(
                                           plan['category'],
                                           style: const TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.bold),
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.black,
+                                          ),
                                           overflow: TextOverflow.ellipsis,
                                           maxLines: 1,
+                                        ),
+                                      ),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 8, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: isActive
+                                              ? Colors.green[100]
+                                              : Colors.orange[100],
+                                          borderRadius:
+                                              BorderRadius.circular(12),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              isActive 
+                                                ? Icons.check_circle_outline 
+                                                : Icons.pause_circle_outline,
+                                              size: 16,
+                                              color: isActive
+                                                ? Colors.green[800]
+                                                : Colors.orange[800],
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              plan['status'],
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: isActive
+                                                    ? Colors.green[800]
+                                                    : Colors.orange[800],
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ),
                                     ],
@@ -702,33 +746,39 @@ class _PlansScreenState extends State<PlansScreen> {
                                     children: [
                                       Expanded(
                                         child: Text(
-                                          '${plan['sessions']} session(s)',
+                                          '${plan['name']} - ${plan['sessions']} session(s)',
                                           style: const TextStyle(
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w500),
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w500,
+                                            color: Colors.black,
+                                          ),
                                         ),
                                       ),
                                       Text(
                                         '\$${(plan['price'] as num).toStringAsFixed(2)}',
-                                        style: const TextStyle(
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.green),
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                          color: isActive ? Colors.green : Colors.orange,
+                                        ),
                                       ),
                                       const SizedBox(width: 4),
                                       Icon(
-                                          expanded
-                                              ? Icons.expand_less
-                                              : Icons.expand_more,
-                                          size: 20),
+                                        expanded
+                                            ? Icons.expand_less
+                                            : Icons.expand_more,
+                                        size: 20,
+                                        color: Colors.black,
+                                      ),
                                     ],
                                   ),
                                   if (expanded) ...[
                                     const SizedBox(height: 8),
                                     Text(
                                       plan['description'] ?? '',
-                                      style:
-                                          const TextStyle(color: Colors.grey),
+                                      style: const TextStyle(
+                                        color: Colors.grey,
+                                      ),
                                     ),
                                     const SizedBox(height: 8),
                                     Row(
@@ -740,8 +790,7 @@ class _PlansScreenState extends State<PlansScreen> {
                                                 (p) => p['docId'] == plan['docId']);
                                             _showAddEditDialog(index: idx);
                                           },
-                                          icon:
-                                              const Icon(Icons.edit, size: 18),
+                                          icon: const Icon(Icons.edit, size: 18),
                                           label: const Text('Edit'),
                                         ),
                                         const SizedBox(width: 4),
