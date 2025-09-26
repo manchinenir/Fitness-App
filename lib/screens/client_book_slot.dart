@@ -189,6 +189,11 @@ class _ClientBookSlotState extends State<ClientBookSlot> {
         });
       });
 
+      // Increment remaining sessions when cancelling
+      if (!suppressError) {
+        await _incrementRemainingSessions(currentUser.uid);
+      }
+
       if (!suppressError) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -214,6 +219,134 @@ class _ClientBookSlotState extends State<ClientBookSlot> {
     }
   }
 
+  // Increment remaining sessions when a booking is cancelled
+  Future<void> _incrementRemainingSessions(String userId) async {
+    try {
+      final querySnapshot = await FirebaseFirestore.instance
+          .collection('client_purchases')
+          .where('userId', isEqualTo: userId)
+          .where('status', isEqualTo: 'active')
+          .get();
+
+      if (querySnapshot.docs.isNotEmpty) {
+        // Find the active plan with remaining sessions less than total sessions
+        for (var doc in querySnapshot.docs) {
+          final data = doc.data();
+          final remainingSessions = (data['remainingSessions'] as num?)?.toInt() ?? 0;
+          final totalSessions = (data['totalSessions'] as num?)?.toInt() ?? 0;
+          
+          if (remainingSessions < totalSessions) {
+            await doc.reference.update({
+              'remainingSessions': remainingSessions + 1,
+            });
+            break;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error incrementing remaining sessions: $e');
+    }
+  }
+
+  // Decrement remaining sessions when a booking is made
+  Future<void> _decrementRemainingSessions(String userId) async {
+    try {
+      final querySnapshot = await FirebaseFirestore.instance
+          .collection('client_purchases')
+          .where('userId', isEqualTo: userId)
+          .where('status', isEqualTo: 'active')
+          .where('remainingSessions', isGreaterThan: 0)
+          .get();
+
+      if (querySnapshot.docs.isNotEmpty) {
+        // Get the first active plan with remaining sessions
+        final doc = querySnapshot.docs.first;
+        final remainingSessions = (doc['remainingSessions'] as num?)?.toInt() ?? 0;
+        
+        await doc.reference.update({
+          'remainingSessions': remainingSessions - 1,
+        });
+      }
+    } catch (e) {
+      debugPrint('Error decrementing remaining sessions: $e');
+    }
+  }
+
+  // Count user's booked slots to compare with remaining sessions
+  Future<int> _countUserBookedSlots(String userId) async {
+    try {
+      final now = DateTime.now();
+      final querySnapshot = await FirebaseFirestore.instance
+          .collection('trainer_slots')
+          .where('booked_by', arrayContains: userId)
+          .get();
+
+      int count = 0;
+      for (var doc in querySnapshot.docs) {
+        final docId = doc.id;
+        final parts = docId.split('|');
+        if (parts.length != 2) continue;
+
+        final dateStr = parts[0];
+        final DateFormat dateFormat = DateFormat('yyyy-MM-dd');
+        final slotDate = dateFormat.parse(dateStr);
+
+        // Only count future slots
+        if (slotDate.isAfter(now) || isSameDay(slotDate, now)) {
+          count++;
+        }
+      }
+      return count;
+    } catch (e) {
+      debugPrint('Error counting booked slots: $e');
+      return 0;
+    }
+  }
+
+  // Check if user has an active plan with remaining sessions
+  Future<Map<String, dynamic>> _checkUserEligibility() async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      return {'eligible': false, 'message': 'Please sign in to book slots'};
+    }
+
+    try {
+      // Check client_purchases collection for active plans
+      final querySnapshot = await FirebaseFirestore.instance
+          .collection('client_purchases')
+          .where('userId', isEqualTo: currentUser.uid)
+          .where('status', isEqualTo: 'active')
+          .get();
+
+      if (querySnapshot.docs.isEmpty) {
+        return {'eligible': false, 'message': 'You have no active plans. Please purchase a plan to proceed.'};
+      }
+
+      // Get total remaining sessions from all active plans
+      int totalRemainingSessions = 0;
+      for (var doc in querySnapshot.docs) {
+        final remainingSessions = (doc['remainingSessions'] as num?)?.toInt() ?? 0;
+        totalRemainingSessions += remainingSessions;
+      }
+
+      if (totalRemainingSessions <= 0) {
+        return {'eligible': false, 'message': 'You have no remaining sessions. Please purchase more sessions to continue.'};
+      }
+
+      // Count user's booked slots
+      final bookedSlotsCount = await _countUserBookedSlots(currentUser.uid);
+      
+      if (bookedSlotsCount >= totalRemainingSessions) {
+        return {'eligible': false, 'message': 'You have reached your session limit. You have booked all your available sessions.'};
+      }
+
+      return {'eligible': true, 'message': ''};
+    } catch (e) {
+      debugPrint('Error checking user eligibility: $e');
+      return {'eligible': false, 'message': 'Error checking your plan status. Please try again.'};
+    }
+  }
+
   void showSlotPopup(String time) async {
     if (_isLoading) return;
     final currentUser = FirebaseAuth.instance.currentUser;
@@ -230,6 +363,28 @@ class _ClientBookSlotState extends State<ClientBookSlot> {
     final doc = await FirebaseFirestore.instance.collection('trainer_slots').doc(docId).get();
     final isBookedByUser = doc.exists && (doc['booked_by'] ?? []).contains(currentUser.uid);
     final isFull = doc.exists && (doc['booked_by'] ?? []).length >= slotCapacity;
+
+    // If user is trying to book (not cancel), check eligibility
+    if (!isBookedByUser && !isFull) {
+      final eligibilityResult = await _checkUserEligibility();
+      
+      if (!eligibilityResult['eligible']) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Booking Not Allowed'),
+            content: Text(eligibilityResult['message']),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+    }
 
     showDialog(
       context: context,
@@ -269,6 +424,8 @@ class _ClientBookSlotState extends State<ClientBookSlot> {
                   );
 
                   if (result == true) {
+                    // Decrement remaining sessions when booking is confirmed
+                    await _decrementRemainingSessions(currentUser.uid);
                     setState(() {}); // refresh UI
                   }
                 }
