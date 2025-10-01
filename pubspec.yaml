@@ -33,6 +33,7 @@ dependencies:
   uuid: ^4.2.2
   intl: ^0.19.0
   rxdart: ^0.27.7            # Added for real-time stream handling
+  timezone: ^0.9.2           # ✅ Added for US time-based greetings
 
 dev_dependencies:
   flutter_test:

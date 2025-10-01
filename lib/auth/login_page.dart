@@ -4,19 +4,24 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
+
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
+
 
   @override
   State<LoginPage> createState() => _LoginPageState();
 }
 
+
 class _LoginPageState extends State<LoginPage> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
+
   final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
+
 
   final _formKey = GlobalKey<FormState>();
   bool isLogin = true;
@@ -27,16 +32,19 @@ class _LoginPageState extends State<LoginPage> {
   String successMessage = '';
   bool _obscurePassword = true;
 
-  // Predefined admin credentials
-  final List<Map<String, String>> _adminCredentials = [
-    {'email': 'Kenny@flextraining.co', 'password': '123456'},
-    {'email': 'sridharkota17@gmail.com', 'password': '123456'},
+
+  // Predefined admin emails (only emails, passwords can be changed via forgot password)
+  final List<String> _allowedAdminEmails = [
+    'Kenny@flextraining.co',
+    'sridharkota17@gmail.com',
   ];
+
 
   // Email validation regex
   final RegExp _emailRegex = RegExp(
     r'^[a-zA-Z0-9.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$',
   );
+
 
   // Updated disposable domains list (only clearly disposable ones)
   final List<String> _disposableDomains = [
@@ -48,28 +56,35 @@ class _LoginPageState extends State<LoginPage> {
     'trashmail.com',
   ];
 
+
   bool _isValidEmail(String email) {
     if (!_emailRegex.hasMatch(email)) return false;
     if (email.contains(' ')) return false;
     if (email.startsWith('.') || email.endsWith('.')) return false;
 
+
     final parts = email.split('@');
     if (parts.length != 2) return false;
+
 
     final domain = parts[1].toLowerCase();
     final domainParts = domain.split('.');
     if (domainParts.length < 2) return false;
     if (domainParts.any((part) => part.isEmpty)) return false;
 
+
     return !_disposableDomains.contains(domain);
   }
+
 
   Future<bool> _verifyEmailWithAPI(String email) async {
     const bool isDebugMode = bool.fromEnvironment('dart.vm.product');
     if (isDebugMode) return true;
 
+
     const apiKey = 'YOUR_API_KEY';
     final url = Uri.parse('https://emailvalidation.abstractapi.com/v1/?api_key=$apiKey&email=$email');
+
 
     try {
       final response = await http.get(url);
@@ -77,6 +92,7 @@ class _LoginPageState extends State<LoginPage> {
         final data = json.decode(response.body);
         final isValid = data['is_valid_format']['value'] ?? true;
         final isDisposable = data['is_disposable_email']['value'] ?? false;
+
 
         return isValid && !isDisposable;
       }
@@ -86,10 +102,12 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+
   Future<bool> _isEmailAlreadyRegistered(String email) async {
     try {
       final methods = await _auth.fetchSignInMethodsForEmail(email);
       if (methods.isNotEmpty) return true;
+
 
       final query = await _firestore
           .collection('users')
@@ -97,20 +115,24 @@ class _LoginPageState extends State<LoginPage> {
           .limit(1)
           .get();
 
+
       return query.docs.isNotEmpty;
     } catch (e) {
       return false;
     }
   }
 
+
   Future<void> _handleAuthentication() async {
     if (!_formKey.currentState!.validate()) return;
+
 
     setState(() {
       isLoading = true;
       errorMessage = '';
       successMessage = '';
     });
+
 
     try {
       await _login();
@@ -129,8 +151,10 @@ class _LoginPageState extends State<LoginPage> {
       }
     }
 
+
     setState(() => isLoading = false);
   }
+
 
   Future<void> _login() async {
     setState(() {
@@ -139,35 +163,37 @@ class _LoginPageState extends State<LoginPage> {
       successMessage = '';
     });
 
+
     try {
       final inputEmail = emailController.text.trim();
       final inputPassword = passwordController.text.trim();
 
-      // Check if the entered credentials match any predefined admin credentials
-      final isValidCredentials = _adminCredentials.any(
-        (cred) => cred['email'] == inputEmail && cred['password'] == inputPassword,
-      );
 
-      if (!isValidCredentials) {
-        throw Exception('Access denied. Only authorized admins can sign up.');
+      // Check if the entered email is in the allowed admin emails list
+      if (!_allowedAdminEmails.contains(inputEmail)) {
+        throw Exception('Access denied. Only authorized admins can login.');
       }
 
-      // Proceed with Firebase authentication
+
+      // Proceed with Firebase authentication - let Firebase handle password validation
       UserCredential userCredential = await _auth.signInWithEmailAndPassword(
         email: inputEmail,
         password: inputPassword,
       );
+
 
       if (!userCredential.user!.emailVerified) {
         await _auth.signOut();
         throw Exception("Email not verified. Please check your inbox.");
       }
 
+
       final userDoc = await _firestore.collection('users').doc(userCredential.user!.uid).get();
       if (!userDoc.exists) {
         await _auth.signOut();
         throw Exception("User record not found. Please create an account first.");
       }
+
 
       final role = userDoc['role'];
       _navigateBasedOnRole(role);
@@ -181,24 +207,28 @@ class _LoginPageState extends State<LoginPage> {
         setState(() => errorMessage = 'Please verify your email to continue.');
       } else if (msg.contains('User record not found')) {
         setState(() => errorMessage = 'No account exists. Please create an account first.');
+      } else if (msg.contains('Access denied')) {
+        setState(() => errorMessage = 'Access denied. Only authorized admins can login.');
       } else {
-        setState(() => errorMessage = 'Access denied. Only authorized admins can sign up.');
+        setState(() => errorMessage = 'Authentication failed. Please try again.');
       }
     } finally {
       setState(() => isLoading = false);
     }
   }
 
+
   void _navigateBasedOnRole(String role) {
     if (role == 'admin') {
       Navigator.pushReplacementNamed(context, '/admin');
     } else {
       setState(() {
-        errorMessage = 'Access denied. Only admins can sign up.';
+        errorMessage = 'Access denied. Only admins can login.';
       });
       _auth.signOut();
     }
   }
+
 
   Future<void> _resetPassword() async {
     final email = emailController.text.trim();
@@ -207,11 +237,20 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
+
+    // Check if the email is in the allowed admin emails list
+    if (!_allowedAdminEmails.contains(email)) {
+      setState(() => errorMessage = 'Password reset is only available for authorized admin emails.');
+      return;
+    }
+
+
     setState(() {
       isSendingResetEmail = true;
       errorMessage = '';
       successMessage = '';
     });
+
 
     try {
       await _auth.sendPasswordResetEmail(email: email);
@@ -230,15 +269,18 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+
   Future<void> _resendVerificationEmail() async {
     final user = _auth.currentUser;
     if (user == null) return;
+
 
     setState(() {
       isVerifyingEmail = true;
       errorMessage = '';
       successMessage = '';
     });
+
 
     try {
       await user.sendEmailVerification();
@@ -253,6 +295,7 @@ class _LoginPageState extends State<LoginPage> {
       setState(() => isVerifyingEmail = false);
     }
   }
+
 
   String _getErrorMessage(String code) {
     switch (code) {
@@ -277,6 +320,7 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+
   void _showErrorSnackbar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -288,6 +332,7 @@ class _LoginPageState extends State<LoginPage> {
       ),
     );
   }
+
 
   void _showSuccessSnackbar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -301,7 +346,9 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
+
   final Color navyBlue = const Color(0xFF1C2D5E);
+
 
   @override
   Widget build(BuildContext context) {
@@ -329,6 +376,7 @@ class _LoginPageState extends State<LoginPage> {
               ),
               const SizedBox(height: 40),
 
+
               Form(
                 key: _formKey,
                 child: Column(
@@ -355,6 +403,7 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     const SizedBox(height: 16),
 
+
                     TextFormField(
                       controller: passwordController,
                       obscureText: _obscurePassword,
@@ -380,6 +429,7 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     const SizedBox(height: 8),
 
+
                     Align(
                       alignment: Alignment.centerRight,
                       child: TextButton(
@@ -390,6 +440,7 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
                     const SizedBox(height: 24),
+
 
                     SizedBox(
                       width: double.infinity,
@@ -407,6 +458,7 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     const SizedBox(height: 24),
 
+
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -417,6 +469,7 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                       ],
                     ),
+
 
                     if (errorMessage.isNotEmpty)
                       Padding(
@@ -437,6 +490,7 @@ class _LoginPageState extends State<LoginPage> {
                           ),
                         ),
                       ),
+
 
                     if (successMessage.isNotEmpty)
                       Padding(

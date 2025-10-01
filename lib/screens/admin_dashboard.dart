@@ -70,7 +70,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     _weekStart = _mondayStart(now);
     _nextWeekStart = _weekStart.add(const Duration(days: 7));
     _totalSlotsThisWeek = _totalSlotsForWeek(_weekStart, availabilityMap);
-    _loadAdminName();
+    _loadAdminName(); // keeps local fallback for first time login
   }
 
   Future<void> _loadAdminName() async {
@@ -116,12 +116,39 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
+  // Updated _getGreeting function to use US Eastern Time
   String _getGreeting() {
-    final now = DateTime.now();
-    final hour = now.hour;
-    if (hour < 12) {
+    final nowUtc = DateTime.now().toUtc();
+    final year = nowUtc.year;
+
+    // Calculate DST boundaries for US Eastern Time
+    // DST starts: 2nd Sunday in March at 2:00 AM EST (7:00 AM UTC)
+    // DST ends: 1st Sunday in November at 2:00 AM EDT (6:00 AM UTC)
+    
+    // Helper function to find nth Sunday of a month
+    DateTime findNthSunday(int year, int month, int n) {
+      DateTime date = DateTime.utc(year, month, 1);
+      int daysToAdd = (DateTime.sunday - date.weekday + 7) % 7;
+      date = date.add(Duration(days: daysToAdd));
+      return date.add(Duration(days: 7 * (n - 1)));
+    }
+
+    // DST start: 2nd Sunday in March at 7:00 AM UTC
+    final dstStart = DateTime.utc(year, 3, findNthSunday(year, 3, 2).day, 7);
+    
+    // DST end: 1st Sunday in November at 6:00 AM UTC
+    final dstEnd = DateTime.utc(year, 11, findNthSunday(year, 11, 1).day, 6);
+
+    // Determine if we're in DST
+    bool isDST = nowUtc.isAfter(dstStart) && nowUtc.isBefore(dstEnd);
+    
+    // Convert to Eastern Time (EST = UTC-5, EDT = UTC-4)
+    final easternTime = nowUtc.add(Duration(hours: isDST ? -4 : -5));
+    final hour = easternTime.hour;
+
+    if (hour >= 0 && hour < 12) {
       return 'Good Morning';
-    } else if (hour < 17) {
+    } else if (hour >= 12 && hour < 17) {
       return 'Good Afternoon';
     } else {
       return 'Good Evening';
@@ -251,6 +278,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   @override
   Widget build(BuildContext context) {
     final double appBarExpandedHeight = MediaQuery.of(context).size.height * 0.24;
+    final user = FirebaseAuth.instance.currentUser;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F8FF),
@@ -320,14 +348,46 @@ class _AdminDashboardState extends State<AdminDashboard> {
                               style: const TextStyle(color: Colors.white70, fontSize: 14),
                             ),
                             const SizedBox(height: 4),
-                            Text(
-                              adminName.isNotEmpty ? '${adminName[0].toUpperCase()}${adminName.substring(1)}' : adminName,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold,
+
+                            /// 🔑 Updated: Admin name comes live from Firestore now
+                            if (user != null)
+                              StreamBuilder<DocumentSnapshot>(
+                                stream: _fs.collection('users').doc(user.uid).snapshots(),
+                                builder: (context, snapshot) {
+                                  if (snapshot.hasData && snapshot.data!.exists) {
+                                    final data = snapshot.data!.data() as Map<String, dynamic>;
+                                    final liveName = data['name'] ?? adminName;
+                                    return Text(
+                                      liveName.toString().isNotEmpty
+                                          ? '${liveName.toString()[0].toUpperCase()}${liveName.toString().substring(1)}'
+                                          : adminName,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    );
+                                  }
+                                  // fallback while loading
+                                  return Text(
+                                    adminName,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  );
+                                },
+                              )
+                            else
+                              Text(
+                                adminName,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
-                            ),
                           ],
                         ),
                       ),
