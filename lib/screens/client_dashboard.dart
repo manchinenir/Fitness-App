@@ -14,7 +14,6 @@ import 'schedule_screen.dart';
 import 'post_announcement.dart';
 import 'profileScreen.dart';
 
-// Dashboard menu item model
 class DashboardItem {
   final IconData icon;
   final String label;
@@ -22,7 +21,7 @@ class DashboardItem {
   final Widget? targetScreen;
   final VoidCallback? action;
   final bool showBadge;
-  final bool enabled; // Add this property
+  final bool enabled;
 
   DashboardItem({
     required this.icon,
@@ -31,7 +30,7 @@ class DashboardItem {
     this.targetScreen,
     this.action,
     this.showBadge = false,
-    this.enabled = true, // Default to enabled
+    this.enabled = true,
   });
 }
 
@@ -57,7 +56,6 @@ class _ClientDashboardState extends State<ClientDashboard> {
   StreamSubscription<User?>? _authSubscription;
   StreamSubscription<DocumentSnapshot>? _profileListener;
   
-  // Store tab disabled status
   Map<String, bool> _tabDisabledStatus = {};
 
   @override
@@ -120,7 +118,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
         });
       }
     } catch (e) {
-      print('Error loading tab disabled status: $e');
+      print('Error loading tab disabled status');
     }
   }
 
@@ -137,7 +135,6 @@ class _ClientDashboardState extends State<ClientDashboard> {
             firestorePhotoUrl = snapshot.data()?['profileImage'];
           });
           
-          // Also update tab disabled status when profile changes
           final disabledTabs = List<String>.from(snapshot.data()?['disabledTabs'] ?? []);
           setState(() {
             _tabDisabledStatus = {
@@ -169,7 +166,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
       int completed = 0;
       List<Map<String, dynamic>> upcoming = [];
       for (final doc in snapshot.docs) {
-        final data = doc.data() as Map<String, dynamic>;
+        final data = doc.data();
         if (data['date'] is! Timestamp) continue;
         final date = (data['date'] as Timestamp).toDate().toLocal();
         final timeRange = data['time'] as String? ?? '';
@@ -196,8 +193,20 @@ class _ClientDashboardState extends State<ClientDashboard> {
         });
       }
     });
-  }
 
+    // Add listener for purchase changes to update active plans count
+    FirebaseFirestore.instance
+        .collection('client_purchases')
+        .where('userId', isEqualTo: uid)
+        .snapshots()
+        .listen((_) {
+      if (mounted) {
+        setState(() {
+          // This will trigger a rebuild of the active plans count StreamBuilder
+        });
+      }
+    });
+  }
   Future<void> _fetchUserProfile() async {
     setState(() {
       isLoading = true;
@@ -217,7 +226,6 @@ class _ClientDashboardState extends State<ClientDashboard> {
         localImageFile = null;
       });
       
-      // Load tab disabled status
       final disabledTabs = List<String>.from(doc.data()?['disabledTabs'] ?? []);
       setState(() {
         _tabDisabledStatus = {
@@ -230,7 +238,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
         };
       });
     } catch (e) {
-      setState(() => errorMessage = 'Error loading user: $e');
+      setState(() => errorMessage = 'Error loading user');
     } finally {
       setState(() => isLoading = false);
     }
@@ -269,7 +277,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to upload image: $e')),
+          SnackBar(content: Text('Failed to upload image')),
         );
       }
     }
@@ -357,7 +365,6 @@ class _ClientDashboardState extends State<ClientDashboard> {
                                 backgroundColor: Colors.white24,
                                 backgroundImage: avatarImage,
                                 onBackgroundImageError: (exception, stackTrace) {
-                                  // Fallback to default image if network image fails to load
                                   setState(() {
                                     firestorePhotoUrl = null;
                                   });
@@ -424,158 +431,148 @@ class _ClientDashboardState extends State<ClientDashboard> {
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               sliver: SliverToBoxAdapter(
-                child: Row(
+                child: Column(
                   children: [
-                    Expanded(
-                      child: _statCard(
-                        icon: Icons.fitness_center,
-                        label: 'Active Plans',
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF6A11CB), Color(0xFF2575FC)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        child: StreamBuilder<QuerySnapshot>(
-                          stream: FirebaseFirestore.instance
-                              .collection('client_purchases')
-                              .where('userId', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
-                              .where('isActive', isEqualTo: true)
-                              .snapshots(),
-                          builder: (context, snap) {
-                            if (snap.hasError) {
-                              return const Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.error, color: Colors.white70, size: 20),
-                                  Text('Error', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                                ],
-                              );
-                            }
-                            
-                            if (!snap.hasData) {
-                              return const Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  SizedBox(
-                                    width: 16,
-                                    height: 16,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white70),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _statCard(
+                            icon: Icons.fitness_center,
+                            label: 'Active Plans',
+                            gradient: const LinearGradient(
+                              colors: [Color(0xFF2E8B57), Color(0xFF228B22)],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            child: StreamBuilder<QuerySnapshot>(
+                              stream: FirebaseFirestore.instance
+                                  .collection('client_purchases')
+                                  .where('userId', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
+                                  .snapshots(),
+                              builder: (context, snap) {
+                                if (snap.hasError) {
+                                  return const Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.error, color: Colors.white70, size: 20),
+                                      SizedBox(height: 2),
+                                      Text(
+                                        'Error', 
+                                        style: TextStyle(
+                                          color: Colors.white70, 
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                }
+                                
+                                if (!snap.hasData) {
+                                  return const Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2.0,
+                                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white70),
+                                        ),
+                                      ),
+                                      SizedBox(height: 4),
+                                      Text(
+                                        'Loading...', 
+                                        style: TextStyle(
+                                          color: Colors.white70, 
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                }
+
+                                int activeCount = 0;
+                                
+                                for (final doc in snap.data!.docs) {
+                                  final data = doc.data() as Map<String, dynamic>;
+                                  final isActive = data['isActive'] as bool? ?? false;
+                                  final remainingSessions = data['remainingSessions'] as int? ?? 0;
+                                  final status = (data['status'] as String? ?? 'active').toLowerCase();
+                                  
+                                  // Count only active plans with remaining sessions that are not cancelled
+                                  if (isActive && remainingSessions > 0 && status != 'cancelled') {
+                                    activeCount++;
+                                  }
+                                }
+                                
+                                return Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      '$activeCount',
+                                      style: const TextStyle(
+                                        fontSize: 34,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                      ),
                                     ),
-                                  ),
-                                  SizedBox(height: 4),
-                                  Text('Loading...', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                                ],
-                              );
-                            }
-
-                            // Filter active plans with remaining sessions > 0
-                            final activePlans = snap.data!.docs.where((doc) {
-                              final data = doc.data() as Map<String, dynamic>;
-                              final isActive = data['isActive'] as bool? ?? false;
-                              final remainingSessions = data['remainingSessions'] as int? ?? 0;
-                              final status = (data['status'] as String? ?? 'active').toLowerCase();
-                              
-                              return isActive && remainingSessions > 0 && status != 'cancelled';
-                            }).toList();
-
-                            final count = activePlans.length;
-                            
-                            return Column(
+                                    const SizedBox(height: 2),
+                                    const Text(
+                                      'ACTIVE PLANS',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _statCard(
+                            icon: Icons.star,
+                            label: 'Completed',
+                            gradient: const LinearGradient(
+                              colors: [Color(0xFFFFD700), Color(0xFFFFA500)],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Text(
-                                  '$count',
+                                  '$completedSessions',
                                   style: const TextStyle(
-                                    fontSize: 24,
+                                    fontSize: 34,
                                     fontWeight: FontWeight.bold,
-                                    color: Colors.white,
+                                    color: Colors.black87,
                                   ),
                                 ),
+                                const SizedBox(height: 2),
                                 const Text(
-                                  'Active Plans',
+                                  'COMPLETED',
                                   style: TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 14,
+                                    color: Colors.black87,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.5,
                                   ),
                                 ),
                               ],
-                            );
-                          },
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _statCard(
-                        icon: Icons.calendar_today,
-                        label: 'Upcoming',
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF11998e), Color(0xFF38ef7d)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Flexible(
-                              child: Text(
-                                nextUpcomingSessionTime ?? 'No upcoming session',
-                                textAlign: TextAlign.center,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 9.5,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            const Text(
-                              'Upcoming Session',
-                              style: TextStyle(
-                                color: Colors.white70,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _statCard(
-                        icon: Icons.star,
-                        label: 'Completed',
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFFff7e5f), Color(0xFFfeb47b)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              '$completedSessions',
-                              style: const TextStyle(
-                                fontSize: 24,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                              ),
-                            ),
-                            const Text(
-                              'Completed',
-                              style: TextStyle(
-                                color: Colors.white70,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
+                    const SizedBox(height: 12),
+                    _upcomingSessionBar(),
                   ],
                 ),
               ),
@@ -590,7 +587,6 @@ class _ClientDashboardState extends State<ClientDashboard> {
                 builder: (context, snap) {
                   final hasNew = snap.hasData && snap.data!.data()?['hasNewWorkout'] == true;
                   
-                  // Create dashboard items with proper enabled status
                   final items = [
                     DashboardItem(
                       icon: Icons.schedule,
@@ -672,7 +668,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
   }) {
     return Container(
       height: 110,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         gradient: gradient,
         borderRadius: BorderRadius.circular(16),
@@ -687,15 +683,81 @@ class _ClientDashboardState extends State<ClientDashboard> {
       child: Stack(
         children: [
           Positioned(
-            top: 6,
-            right: 6,
+            top: 4,
+            right: 4,
             child: Icon(
               icon,
-              size: 36,
-              color: Colors.white.withOpacity(0.2),
+              size: 32,
+              color: label == 'Completed' 
+                ? Colors.black.withOpacity(0.1)
+                : Colors.white.withOpacity(0.2),
             ),
           ),
           Center(child: child),
+        ],
+      ),
+    );
+  }
+
+  Widget _upcomingSessionBar() {
+    return Container(
+      width: double.infinity,
+      height: 110,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF1e3c72), Color(0xFF2a5298)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 6,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'UPCOMING SESSION',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Flexible(
+                  child: Text(
+                    nextUpcomingSessionTime ?? 'No upcoming session',
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Icon(
+            Icons.calendar_today,
+            size: 32,
+            color: Colors.white.withOpacity(0.3),
+          ),
         ],
       ),
     );
@@ -766,6 +828,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
                         style: TextStyle(
                           fontSize: 12,
                           color: Colors.grey,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
                   ],
@@ -778,7 +841,11 @@ class _ClientDashboardState extends State<ClientDashboard> {
                       radius: 10,
                       backgroundColor: Colors.red,
                       child: Text('!',
-                          style: TextStyle(color: Colors.white, fontSize: 12)),
+                          style: TextStyle(
+                            color: Colors.white, 
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          )),
                     ),
                   ),
               ],

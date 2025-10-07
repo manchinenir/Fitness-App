@@ -405,13 +405,14 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
                         width: 56,
                         child: IconButton(
                           icon: const Icon(Icons.filter_list_rounded, color: Color(0xFF1C2D5E)),
+                          // In the filter button onPressed handler, replace with this:
                           onPressed: () async {
+                            final categories = ['Birthday', 'General', 'Event', 'Important'];
                             final selected = await showDialog<List<String>>(
                               context: context,
                               builder: (ctx) {
-                                final categories = ['Birthday', 'General', 'Event', 'Important', 'Promotion', 'Referral'];
                                 List<String> tempSelected = [...selectedCategories];
-
+                                
                                 return StatefulBuilder(
                                   builder: (context, setState) {
                                     return AlertDialog(
@@ -461,6 +462,7 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
                                 );
                               },
                             );
+                            
                             if (selected != null) {
                               setState(() {
                                 selectedCategories = selected;
@@ -1029,164 +1031,40 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
                     ),
                     
                     const SizedBox(height: 16),
-                    
-                    // Your friends section
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.grey.withOpacity(0.1),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            "Your Friends",
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF1C2D5E),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          const Divider(height: 1, color: Colors.grey),
-                          const SizedBox(height: 16),
-                          
-                          if (successfulReferrals.isEmpty)
-                            Container(
-                              padding: const EdgeInsets.all(24),
-                              decoration: BoxDecoration(
-                                color: Colors.grey[50],
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Column(
-                                children: [
-                                  Icon(
-                                    Icons.people_outline,
-                                    size: 64,
-                                    color: Colors.grey[400],
-                                  ),
-                                  const SizedBox(height: 16),
-                                  const Text(
-                                    "No friends have joined yet",
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.grey,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  const Text(
-                                    "Share your referral link to start earning free sessions!",
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      color: Colors.grey,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            )
-                          else
-                            Column(
-                              children: successfulReferrals.map((referral) {
-                                final joinDate = (referral['joinedAt'] as Timestamp).toDate();
-                                return Container(
-                                  margin: const EdgeInsets.only(bottom: 12),
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: Colors.grey[50],
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Container(
-                                        width: 40,
-                                        height: 40,
-                                        decoration: const BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          gradient: LinearGradient(
-                                            begin: Alignment.topLeft,
-                                            end: Alignment.bottomRight,
-                                            colors: [Color(0xFF1C2D5E), Color(0xFF2D3F73)],
-                                          ),
-                                        ),
-                                        child: const Icon(Icons.person, color: Colors.white, size: 20),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              referral['friendName'] ?? 'Friend',
-                                              style: const TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 16,
-                                              ),
-                                            ),
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              "Joined on ${DateFormat.yMMMd().format(joinDate)}",
-                                              style: const TextStyle(
-                                                color: Colors.grey,
-                                                fontSize: 12,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      const Icon(Icons.check_circle, color: Colors.green, size: 20),
-                                    ],
-                                  ),
-                                );
-                              }).toList(),
-                            ),
-                        ],
-                      ),
-                    ),
-                    
-                    const SizedBox(height: 24),
-                    
-                    // Share button at bottom
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: _shareReferral,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1C2D5E),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          elevation: 4,
-                        ),
-                        child: const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.share),
-                            SizedBox(width: 8),
-                            Text(
-                              "Share Referral Link",
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
                   ],
                 ),
+              ),
+            ),
+          ),
+          
+          // Share button at bottom (outside Expanded to stay at bottom)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            child: ElevatedButton(
+              onPressed: _shareReferral,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1C2D5E),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                elevation: 4,
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.share),
+                  SizedBox(width: 8),
+                  Text(
+                    "Share Referral Link",
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -1194,7 +1072,6 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
       );
     }
   }
-
   Widget _buildHowItWorksItem(String text) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -1347,13 +1224,32 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
           final isActive = data['active'] == true;
           if (!isActive) return false;
           
-          // Apply search filter
+          // Enhanced search filter for promotions
           bool matchSearch = searchQuery.isEmpty;
-          if (!matchSearch && data['title'] != null) {
-            matchSearch = data['title'].toString().toLowerCase().contains(searchQuery);
-          }
-          if (!matchSearch && data['description'] != null) {
-            matchSearch = data['description'].toString().toLowerCase().contains(searchQuery);
+          if (!matchSearch) {
+            final title = data['title']?.toString()?.toLowerCase() ?? '';
+            final description = data['description']?.toString()?.toLowerCase() ?? '';
+            final code = data['code']?.toString()?.toLowerCase() ?? '';
+            final offer = data['offer']?.toString()?.toLowerCase() ?? '';
+            
+            // Check date if available
+            String startDateStr = '';
+            String endDateStr = '';
+            if (data['start'] != null) {
+              final startDate = (data['start'] as Timestamp).toDate();
+              startDateStr = DateFormat('yyyy-MM-dd').format(startDate).toLowerCase();
+            }
+            if (data['end'] != null) {
+              final endDate = (data['end'] as Timestamp).toDate();
+              endDateStr = DateFormat('yyyy-MM-dd').format(endDate).toLowerCase();
+            }
+            
+            matchSearch = title.contains(searchQuery) || 
+                        description.contains(searchQuery) || 
+                        code.contains(searchQuery) ||
+                        offer.contains(searchQuery) ||
+                        startDateStr.contains(searchQuery) ||
+                        endDateStr.contains(searchQuery);
           }
           
           return matchSearch;
@@ -1462,7 +1358,7 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
             return false;
           }
 
-          // Check audience restrictions - CRITICAL FIX
+          // Check audience restrictions
           final audience = data['audience'] ?? 'All Users';
           if (audience == 'Specific Clients') {
             final targetClientIds = List<String>.from(data['targetClientIds'] ?? []);
@@ -1472,25 +1368,33 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
             }
           }
 
-          // Filter by tab selection
-          bool matchTab = true;
-          if (_selectedTab == 2) { // Referrals tab
-            matchTab = data['category'] == 'Referral';
-          }
-
+          // Filter by category
           bool matchCategory = selectedCategories.isEmpty || 
               (data['category'] != null && selectedCategories.contains(data['category']));
           
+          // Enhanced search functionality
           bool matchSearch = searchQuery.isEmpty;
           if (!matchSearch) {
             final title = data['title']?.toString()?.toLowerCase() ?? '';
             final message = data['message']?.toString()?.toLowerCase() ?? '';
-            matchSearch = title.contains(searchQuery) || message.contains(searchQuery);
+            final category = data['category']?.toString()?.toLowerCase() ?? '';
+            final dateStr = DateFormat('yyyy-MM-dd').format(announcementTime).toLowerCase();
+            final timeStr = DateFormat('hh:mm a').format(announcementTime).toLowerCase();
+            
+            matchSearch = title.contains(searchQuery) || 
+                        message.contains(searchQuery) || 
+                        category.contains(searchQuery) ||
+                        dateStr.contains(searchQuery) ||
+                        timeStr.contains(searchQuery);
           }
           
-          bool matchUnread = !showUnreadOnly || !readAnnouncements.contains(docId);
+          // FIXED: Properly handle unread filter
+          bool matchUnread = true;
+          if (showUnreadOnly) {
+            matchUnread = !readAnnouncements.contains(docId);
+          }
 
-          return matchTab && matchCategory && matchSearch && matchUnread;
+          return matchCategory && matchSearch && matchUnread;
         }).toList();
 
 

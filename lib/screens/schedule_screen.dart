@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
-import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 import 'client_book_slot.dart';
 
@@ -24,134 +24,225 @@ class _MySchedulePageState extends State<MySchedulePage> with SingleTickerProvid
   @override
   void initState() {
     super.initState();
-    _listenToBookedSlots(); // real-time listener
+    _listenToBookedSlots();
   }
-void _listenToBookedSlots() {
-  final user = _auth.currentUser;
-  if (user == null) return;
 
-  _firestore
-  .collection('trainer_slots')
-  .where('booked_by', arrayContains: user.uid)
-  .snapshots()
-  .listen((snapshot) {
+  void _listenToBookedSlots() {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    _firestore
+        .collection('trainer_slots')
+        .where('booked_by', arrayContains: user.uid)
+        .snapshots()
+        .listen((snapshot) {
+      try {
+        final now = DateTime.now();
+        final past = <Map<String, dynamic>>[];
+        final upcoming = <Map<String, dynamic>>[];
+
+        for (var doc in snapshot.docs) {
+          final data = doc.data();
+
+          // Extract date and time correctly
+          DateTime slotDate;
+          String timeString = '';
+
+          // Handle date parsing - ensure we get a DateTime
+          if (data['date'] is Timestamp) {
+            slotDate = (data['date'] as Timestamp).toDate().toLocal();
+          } else if (data['date'] is DateTime) {
+            slotDate = (data['date'] as DateTime).toLocal();
+          } else if (data['date'] is String) {
+            // Handle string date format (yyyy-MM-dd)
+            try {
+              slotDate = DateFormat('yyyy-MM-dd').parse(data['date'] as String);
+            } catch (e) {
+              debugPrint('Invalid date format: ${data['date']}');
+              continue;
+            }
+          } else {
+            debugPrint('Invalid date type: ${data['date']}');
+            continue;
+          }
+
+          // ... rest of your parsing logic remains the same
+          // Handle time parsing
+          if (data['time'] is String) {
+            timeString = data['time'] as String;
+          } else {
+            debugPrint('Invalid time type: ${data['time']}');
+            continue;
+          }
+
+          // Parse the time to get DateTime with correct time component
+          DateTime slotDateTime;
+          try {
+            // Extract start time from time string (e.g., "5:30 AM - 6:30 AM")
+            final startTimeStr = timeString.contains(' - ')
+                ? timeString.split(' - ').first.trim()
+                : timeString.trim();
+
+            // Parse the time using DateFormat.jm()
+            final parsedTime = DateFormat.jm().parse(startTimeStr);
+
+            // Combine date with time
+            slotDateTime = DateTime(
+              slotDate.year,
+              slotDate.month,
+              slotDate.day,
+              parsedTime.hour,
+              parsedTime.minute,
+            );
+          } catch (e) {
+            debugPrint('Error parsing time "$timeString"');
+            continue;
+          }
+
+          final statusByUser = Map<String, dynamic>.from(data['status_by_user'] ?? {});
+          final perUserStatus = statusByUser[user.uid] as String?;
+
+          final slot = {
+            'id': doc.id,
+            'date': slotDateTime, // This is now always a DateTime
+            'time': timeString,
+            'trainer': data['trainer_name'] ?? 'Unknown Trainer',
+            'status': perUserStatus ?? (data['status'] ?? 'Confirmed'),
+            'docRef': doc.reference,
+          };
+
+          if (slotDateTime.isBefore(now)) {
+            past.add(slot);
+          } else {
+            upcoming.add(slot);
+          }
+        }
+
+        // Sort past sessions (newest first) and upcoming sessions (oldest first)
+        past.sort((a, b) => b['date'].compareTo(a['date']));
+        upcoming.sort((a, b) => a['date'].compareTo(b['date'])); // Fixed: should compare b['date']
+
+        setState(() {
+          _pastSlots = past;
+          _upcomingSlots = upcoming;
+          _isLoading = false;
+        });
+      } catch (e, st) {
+        debugPrint('MySchedule snapshot parse error: $e\n$st');
+        setState(() => _isLoading = false);
+      }
+    }, onError: (e, st) {
+      debugPrint('MySchedule stream error: $e\n$st');
+      setState(() => _isLoading = false);
+    });
+  }
+
+  Future<void> _cancelBooking(DocumentReference docRef) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
     try {
-      final now = DateTime.now();
-      final past = <Map<String, dynamic>>[];
-      final upcoming = <Map<String, dynamic>>[];
+      String? userPurchaseId;
+      
+      await _firestore.runTransaction((transaction) async {
+        final snap = await transaction.get(docRef);
+        if (!snap.exists) throw Exception('Slot not found');
 
-      for (var doc in snapshot.docs) {
-        final data = doc.data();
+        final data = snap.data() as Map<String, dynamic>;
+        List bookedBy = List.from(data['booked_by'] ?? []);
+        List bookedNames = List.from(data['booked_names'] ?? []);
+        List bookedEmails = List.from(data['booked_emails'] ?? []);
+        List purchaseIds = List.from(data['purchase_ids'] ?? []);
+        Map<String, dynamic> userPurchaseMap = Map<String, dynamic>.from(data['user_purchase_map'] ?? {});
 
-        // DATE
-        DateTime rawDate = DateTime.now();
-        if (data['date'] is Timestamp) {
-          rawDate = (data['date'] as Timestamp).toDate().toLocal();
-        }
+        final idx = bookedBy.indexOf(user.uid);
+        if (idx == -1) throw Exception('You do not have a booking in this slot');
 
-        // TIME (robust)
-        final timeRaw = (data['time'] ?? '').toString();
-        final startStr = timeRaw.contains(' - ')
-            ? timeRaw.split(' - ').first.trim()
-            : timeRaw.trim();
+        // Get the purchase ID before removing the user
+        userPurchaseId = userPurchaseMap[user.uid] as String?;
 
-        TimeOfDay timeOfDay;
-        try {
-          final parsed = DateFormat.jm().parseLoose(startStr);
-          timeOfDay = TimeOfDay(hour: parsed.hour, minute: parsed.minute);
-        } catch (_) {
-          // If time field is missing/bad, skip this doc instead of crashing
-          debugPrint('Skipped doc ${doc.id} due to invalid time: "$timeRaw"');
-          continue;
-        }
+        bookedBy.removeAt(idx);
+        if (idx < bookedNames.length) bookedNames.removeAt(idx);
+        if (idx < bookedEmails.length) bookedEmails.removeAt(idx);
+        if (idx < purchaseIds.length) purchaseIds.removeAt(idx);
+        userPurchaseMap.remove(user.uid);
 
-        final slotDateTime = DateTime(
-          rawDate.year, rawDate.month, rawDate.day, timeOfDay.hour, timeOfDay.minute,
-        );
+        transaction.update(docRef, {
+          'booked': bookedBy.length,
+          'booked_by': bookedBy,
+          'booked_names': bookedNames,
+          'booked_emails': bookedEmails,
+          'purchase_ids': purchaseIds,
+          'user_purchase_map': userPurchaseMap,
+          'last_updated': FieldValue.serverTimestamp(),
+          'status_by_user': {user.uid: 'Cancelled'},
+        });
+      });
 
-        final statusByUser = Map<String, dynamic>.from(data['status_by_user'] ?? {});
-        final perUserStatus = statusByUser[user.uid] as String?;
-
-        final slot = {
-          'id': doc.id,
-          'date': slotDateTime,
-          'time': timeRaw,
-          'trainer': data['trainer_name'] ?? 'Unknown Trainer',
-          'status': perUserStatus ?? (data['status'] ?? 'Confirmed'),
-          'docRef': doc.reference,
-        };
-
-        (slotDateTime.isBefore(now) ? past : upcoming).add(slot);
+      // ✅ FIX: Update purchase data AFTER successful cancellation
+    if (userPurchaseId != null) {
+        await _updatePurchaseOnCancellation(userPurchaseId!);
       }
 
-      setState(() {
-        _pastSlots = past;
-        _upcomingSlots = upcoming;
-        _isLoading = false;
-      });
-    } catch (e, st) {
-      debugPrint('MySchedule snapshot parse error: $e\n$st');
-      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Booking cancelled successfully'),
+          backgroundColor: Colors.green,
+        ),
+      );
+
+      // Force refresh purchase data
+      await _loadEligiblePurchase();
+      setState(() {});
+
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to cancel booking: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      debugPrint('Cancellation error');
     }
-  }, onError: (e, st) {
-    debugPrint('MySchedule stream error: $e\n$st');
-    setState(() => _isLoading = false);
-  });
-
-  
-}
-
-  
-Future<void> _cancelBooking(DocumentReference docRef) async {
-  final user = _auth.currentUser;
-  if (user == null) return;
-
-  try {
-    await _firestore.runTransaction((transaction) async {
-      final snap = await transaction.get(docRef);
-      if (!snap.exists) throw Exception('Slot not found');
-
-      final data = snap.data() as Map<String, dynamic>;
-      List bookedBy     = List.from(data['booked_by'] ?? []);
-      List bookedNames  = List.from(data['booked_names'] ?? []);
-      List bookedEmails = List.from(data['booked_emails'] ?? []);
-
-      // Find by uid, then remove name/email at the same index
-      final idx = bookedBy.indexOf(user.uid);
-      if (idx == -1) throw Exception('You do not have a booking in this slot');
-
-      // Optionally fetch canonical name/email (if you want perfect consistency)
-      final userDoc = await _firestore.collection('users').doc(user.uid).get();
-      final userName = userDoc.data()?['name'] ?? 'Client';
-      final userEmail = userDoc.data()?['email'] ?? '';
-
-      bookedBy.removeAt(idx);
-      if (idx < bookedNames.length)  bookedNames.removeAt(idx);
-      if (idx < bookedEmails.length) bookedEmails.removeAt(idx);
-
-      transaction.update(docRef, {
-        'booked': bookedBy.length,
-        'booked_by': bookedBy,
-        'booked_names': bookedNames,
-        'booked_emails': bookedEmails,
-        'last_updated': FieldValue.serverTimestamp(),
-        // Per-user status (doesn't affect other attendees)
-        'status_by_user': { user.uid: 'Cancelled' },
-      });
-    });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Booking cancelled successfully')),
-    );
-  } catch (e) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Failed to cancel: ${e.toString()}')),
-    );
   }
-}
 
- 
+  // Add this helper method
+  Future<void> _updatePurchaseOnCancellation(String purchaseId) async {
+    try {
+      final purchaseDoc = await _firestore.collection('client_purchases').doc(purchaseId).get();
+      
+      if (purchaseDoc.exists) {
+        final purchaseData = purchaseDoc.data()!;
+        final isActive = purchaseData['isActive'] as bool? ?? false;
+        final status = (purchaseData['status'] as String? ?? 'active').toLowerCase();
+        final currentBooked = (purchaseData['bookedSessions'] as num?)?.toInt() ?? 0;
+        final currentRemaining = (purchaseData['remainingSessions'] as num?)?.toInt() ?? 0;
+        final totalSessions = (purchaseData['totalSessions'] as num?)?.toInt() ?? 0;
+        
+        // ✅ FIX: Only update if plan is active AND we have booked sessions to decrement
+        if (isActive && status != 'cancelled' && currentBooked > 0) {
+          await purchaseDoc.reference.update({
+            'bookedSessions': currentBooked - 1, // Decrement booked sessions
+            'availableSessions': FieldValue.increment(1), // Increment available sessions
+            // Remaining sessions stays the same - we're just moving from booked back to available
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+          print('🔄 Updated purchase on cancellation: Booked: ${currentBooked - 1}, Available: +1');
+        } else {
+          print('ℹ️ Session not returned - Plan inactive/cancelled or no booked sessions');
+        }
+      }
+    } catch (e) {
+      print('⚠️ Could not update purchase sessions, but booking was cancelled');
+    }
+  }
 
+  // Add this helper method to reload eligible purchases
+  Future<void> _loadEligiblePurchase() async {
+    // This method should reload the user's eligible purchases
+    // You might need to implement this based on your book slot logic
+    print('🔄 Reloading eligible purchases after cancellation');
+  }
   void _showCancelDialog(DocumentReference docRef) {
     showDialog(
       context: context,
@@ -176,16 +267,26 @@ Future<void> _cancelBooking(DocumentReference docRef) async {
   }
 
   void _rescheduleBooking(Map<String, dynamic> slot) {
-    Navigator.push(
+    final rescheduleData = {
+      ...slot,
+      'date': Timestamp.fromDate(slot['date'] as DateTime),
+      'time': slot['time'],
+      'trainer': slot['trainer'],
+      'docRef': slot['docRef'],
+      'isReschedule': true,
+      'originalSlotId': slot['id'],
+    };
+
+    // Use pushReplacement to ensure we don't go back to the reschedule context
+    Navigator.pushReplacement(
       context,
       MaterialPageRoute(
         builder: (context) => ClientBookSlot(
-          rescheduleSlot: slot,
+          rescheduleSlot: rescheduleData,
         ),
       ),
     );
   }
-
   Widget _buildSlotCard(Map<String, dynamic> slot, {bool isPast = false}) {
     final dateStr = DateFormat.yMMMMEEEEd().format(slot['date']);
     final time = slot['time'];
@@ -213,30 +314,32 @@ Future<void> _cancelBooking(DocumentReference docRef) async {
                     style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1C2D5E)),
                   ),
                 ),
-               if (!isPast) ...[
-  if (status != 'Rescheduled')
-    TextButton(
-      onPressed: () => _rescheduleBooking(slot),
-      child: const Text('Reschedule', style: TextStyle(color: Colors.orange)),
-    ),
-  TextButton(
-    onPressed: () => _showCancelDialog(slot['docRef']),
-    child: const Text('Cancel', style: TextStyle(color: Colors.red)),
-  ),
-]
-
+                if (!isPast) ...[
+                  if (status != 'Rescheduled')
+                    TextButton(
+                      onPressed: () => _rescheduleBooking({
+                        ...slot,
+                        'id': slot['id'], // Ensure ID is passed
+                      }),
+                      child: const Text('Reschedule', style: TextStyle(color: Colors.orange)),
+                    ),
+                  TextButton(
+                    onPressed: () => _showCancelDialog(slot['docRef']),
+                    child: const Text('Cancel', style: TextStyle(color: Colors.red)),
+                  ),
+                ]
               ],
             ),
+            // ... rest of your card content remains the same
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
                 color: status == 'Cancelled'
-    ? Colors.red
-    : status == 'Rescheduled'
-        ? Colors.orange
-        : Colors.green,
-
+                    ? Colors.red
+                    : status == 'Rescheduled'
+                        ? Colors.orange
+                        : Colors.green,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
@@ -267,26 +370,222 @@ Future<void> _cancelBooking(DocumentReference docRef) async {
   }
 
   void _exportToPDF() async {
-    final pdf = pw.Document();
+    try {
+      final pdf = pw.Document();
 
-    pdf.addPage(
-      pw.MultiPage(
-        build: (context) => [
-          pw.Header(level: 0, child: pw.Text('My Schedule - ${DateFormat('yyyy-MM-dd').format(DateTime.now())}')),
-          if (_upcomingSlots.isNotEmpty) ...[
-            pw.Header(level: 1, child: pw.Text('Upcoming Sessions')),
-            ..._upcomingSlots.map((slot) => pw.Paragraph(text: '📅 ${DateFormat('EEEE, MMMM d').format(slot['date'])} - ${slot['time']} with ${slot['trainer']} (${slot['status']})')),
-            pw.SizedBox(height: 16),
-          ],
-          if (_pastSlots.isNotEmpty) ...[
-            pw.Header(level: 1, child: pw.Text('Past Sessions')),
-            ..._pastSlots.map((slot) => pw.Paragraph(text: '🕒 ${DateFormat('EEEE, MMMM d').format(slot['date'])} - ${slot['time']} with ${slot['trainer']} (${slot['status']})')),
-          ],
-        ],
-      ),
-    );
+      // Convert to US Eastern Time
+      final now = DateTime.now();
+      final usTime = now.subtract(Duration(hours: 10, minutes: 30)); // Convert IST to EST (approximate)
+      final dateStr = DateFormat('MMMM d, yyyy').format(usTime);
+      final timeStr = DateFormat('h:mm a').format(usTime);
 
-    await Printing.layoutPdf(onLayout: (format) => pdf.save());
+      // Use standard A4 format (iOS 4.0, EA4 portrait format)
+      final a4Format = PdfPageFormat.a4;
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: a4Format,
+          margin: const pw.EdgeInsets.all(20),
+          build: (context) => [
+            // Title
+            pw.Text(
+              'My Training Schedule',
+              style: pw.TextStyle(
+                fontSize: 14, // Changed from 40 to 14
+                fontWeight: pw.FontWeight.bold,
+              ),
+              textAlign: pw.TextAlign.center,
+            ),
+            pw.SizedBox(height: 10), // Reduced from 15
+            pw.Text(
+              'Generated on: $dateStr and $timeStr EST',
+              style: pw.TextStyle(fontSize: 11), // Changed from 28 to 11
+              textAlign: pw.TextAlign.center,
+            ),
+            pw.SizedBox(height: 20), // Reduced from 25
+
+            // Upcoming Sessions Section
+            if (_upcomingSlots.isNotEmpty) ...[
+              pw.Text(
+                'Upcoming Sessions (${_upcomingSlots.length})',
+                style: pw.TextStyle(
+                  fontSize: 14, // Changed from 36 to 14
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 10), // Reduced from 15
+              ..._upcomingSlots.map((slot) {
+                final dateText = DateFormat('MMMM d, yyyy').format(slot['date']);
+                final timeText = slot['time'];
+                final trainerText = slot['trainer'];
+                final statusText = slot['status'] ?? 'Confirmed';
+
+                return pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Container(
+                      width: double.infinity,
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text(
+                            trainerText,
+                            style: pw.TextStyle(
+                              fontSize: 12, // Changed from 32 to 12
+                              fontWeight: pw.FontWeight.bold,
+                            ),
+                          ),
+                          pw.SizedBox(height: 6), // Reduced from 8
+                          pw.Row(
+                            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                            children: [
+                              pw.Expanded(
+                                child: pw.Text(
+                                  'Date: $dateText',
+                                  style: pw.TextStyle(fontSize: 11), // Changed from 28 to 11
+                                ),
+                              ),
+                              pw.Text(
+                                'Status: ',
+                                style: pw.TextStyle(
+                                  fontSize: 11, // Changed from 28 to 11
+                                  fontWeight: pw.FontWeight.bold,
+                                ),
+                              ),
+                              pw.Text(
+                                statusText,
+                                style: pw.TextStyle(
+                                  fontSize: 11, // Changed from 28 to 11
+                                  color: statusText == 'Cancelled'
+                                      ? PdfColors.red
+                                      : statusText == 'Rescheduled'
+                                          ? PdfColors.orange
+                                          : PdfColors.green,
+                                  fontWeight: pw.FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                          pw.SizedBox(height: 4), // Reduced from 5
+                          pw.Text(
+                            'Time: $timeText',
+                            style: pw.TextStyle(fontSize: 11), // Changed from 28 to 11
+                          ),
+                        ],
+                      ),
+                    ),
+                    pw.SizedBox(height: 10), // Reduced from 15
+                    pw.Divider(thickness: 1, color: PdfColors.grey300),
+                    pw.SizedBox(height: 8), // Reduced from 10
+                  ],
+                );
+              }).toList(),
+              pw.SizedBox(height: 15), // Reduced from 20
+            ],
+
+            // Past Sessions Section
+            if (_pastSlots.isNotEmpty) ...[
+              pw.Text(
+                'Past Sessions (${_pastSlots.length})',
+                style: pw.TextStyle(
+                  fontSize: 14, // Changed from 36 to 14
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 10), // Reduced from 15
+              ..._pastSlots.map((slot) {
+                final dateText = DateFormat('MMMM d, yyyy').format(slot['date']);
+                final timeText = slot['time'];
+                final trainerText = slot['trainer'];
+                final statusText = slot['status'] ?? 'Completed';
+
+                return pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Container(
+                      width: double.infinity,
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text(
+                            trainerText,
+                            style: pw.TextStyle(
+                              fontSize: 12, // Changed from 32 to 12
+                              fontWeight: pw.FontWeight.bold,
+                              color: PdfColors.grey600,
+                            ),
+                          ),
+                          pw.SizedBox(height: 6), // Reduced from 8
+                          pw.Row(
+                            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                            children: [
+                              pw.Expanded(
+                                child: pw.Text(
+                                  'Date: $dateText',
+                                  style: pw.TextStyle(
+                                    fontSize: 11, // Changed from 28 to 11
+                                    color: PdfColors.grey600,
+                                  ),
+                                ),
+                              ),
+                              pw.Text(
+                                'Status: $statusText',
+                                style: pw.TextStyle(
+                                  fontSize: 11, // Changed from 28 to 11
+                                  color: PdfColors.grey600,
+                                  fontWeight: pw.FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                          pw.SizedBox(height: 4), // Reduced from 5
+                          pw.Text(
+                            'Time: $timeText',
+                            style: pw.TextStyle(
+                              fontSize: 11, // Changed from 28 to 11
+                              color: PdfColors.grey600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    pw.SizedBox(height: 10), // Reduced from 15
+                    pw.Divider(thickness: 1, color: PdfColors.grey300),
+                    pw.SizedBox(height: 8), // Reduced from 10
+                  ],
+                );
+              }).toList(),
+            ],
+
+            // Empty state messages
+            if (_upcomingSlots.isEmpty && _pastSlots.isEmpty) ...[
+              pw.Center(
+                child: pw.Text(
+                  'No sessions found',
+                  style: pw.TextStyle(fontSize: 11), // Changed from 32 to 11
+                ),
+              ),
+            ],
+          ],
+          // Remove page numbers by not defining footer
+          footer: null, // This removes page numbers
+        ),
+      );
+
+      // Open the PDF printing dialog with fixed format and no options
+      await Printing.layoutPdf(
+        format: a4Format, // Fixed format - user can't change
+        onLayout: (PdfPageFormat format) async => pdf.save(),
+      );
+    } catch (e) {
+      // Show error message if PDF generation fails
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to generate PDF'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   @override

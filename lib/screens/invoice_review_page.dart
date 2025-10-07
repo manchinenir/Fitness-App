@@ -87,6 +87,12 @@ class _InvoiceReviewPageState extends State<InvoiceReviewPage> {
       appBar: AppBar(
         title: const Text('Review Plan'),
         backgroundColor: const Color(0xFF1C2D5E),
+        foregroundColor: Colors.white, // This makes the back button and title white
+        titleTextStyle: const TextStyle(
+          color: Colors.white, // Explicitly set title color to white
+          fontSize: 20,
+          fontWeight: FontWeight.bold,
+        ),
       ),
       body: Padding(
         padding: const EdgeInsets.all(20),
