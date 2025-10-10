@@ -15,6 +15,7 @@ import 'client_list_screen.dart';
 import 'post_announcement.dart';
 import 'RevenueReport_screen.dart';
 import 'settings.dart';
+import 'active_members_screen.dart'; // ⬅️ tap the pie to open this page
 
 class AdminDashboard extends StatefulWidget {
   final String userName;
@@ -121,10 +122,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final nowUtc = DateTime.now().toUtc();
     final year = nowUtc.year;
 
-    // Calculate DST boundaries for US Eastern Time
-    // DST starts: 2nd Sunday in March at 2:00 AM EST (7:00 AM UTC)
-    // DST ends: 1st Sunday in November at 2:00 AM EDT (6:00 AM UTC)
-    
     // Helper function to find nth Sunday of a month
     DateTime findNthSunday(int year, int month, int n) {
       DateTime date = DateTime.utc(year, month, 1);
@@ -135,13 +132,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
     // DST start: 2nd Sunday in March at 7:00 AM UTC
     final dstStart = DateTime.utc(year, 3, findNthSunday(year, 3, 2).day, 7);
-    
+
     // DST end: 1st Sunday in November at 6:00 AM UTC
     final dstEnd = DateTime.utc(year, 11, findNthSunday(year, 11, 1).day, 6);
 
     // Determine if we're in DST
     bool isDST = nowUtc.isAfter(dstStart) && nowUtc.isBefore(dstEnd);
-    
+
     // Convert to Eastern Time (EST = UTC-5, EDT = UTC-4)
     final easternTime = nowUtc.add(Duration(hours: isDST ? -4 : -5));
     final hour = easternTime.hour;
@@ -180,43 +177,24 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
+  /// 🔵 Unique active members count (distinct userId with at least one active purchase)
   Stream<int> _activeMembersStream() {
     return _fs
         .collection('client_purchases')
         .where('status', isEqualTo: 'active')
+        // If you want "currently valid" only, also require:
+        // .where('startDate', isLessThanOrEqualTo: Timestamp.now())
+        // .where('endDate', isGreaterThanOrEqualTo: Timestamp.now())
         .snapshots()
-        .asyncMap((purchasesSnap) async {
+        .map((purchasesSnap) {
       final activeUserIds = <String>{};
       for (var doc in purchasesSnap.docs) {
         final data = doc.data();
         final userId = data.containsKey('userId') ? (data['userId'] as String?) : null;
-        if (userId != null) activeUserIds.add(userId);
+        if (userId != null && userId.isNotEmpty) activeUserIds.add(userId);
       }
       return activeUserIds.length;
     });
-  }
-
-  Future<_ActiveData> _fetchActiveMembers() async {
-    try {
-      final purchasesSnap = await _fs.collection('client_purchases').where('status', isEqualTo: 'active').get();
-
-      final activeUserIds = <String>{};
-      for (var doc in purchasesSnap.docs) {
-        final data = doc.data();
-        final userId = data.containsKey('userId') ? (data['userId'] as String?) : null;
-        if (userId != null) activeUserIds.add(userId);
-      }
-
-      final activeMembers = activeUserIds.length;
-
-      final usersSnap = await _fs.collection('users').where('role', isEqualTo: 'client').get();
-      final totalClients = usersSnap.docs.length;
-
-      return _ActiveData(active: activeMembers, total: totalClients);
-    } catch (e) {
-      debugPrint('Error fetching active members: $e');
-      return _ActiveData(active: 0, total: 0);
-    }
   }
 
   Stream<int> _bookedThisWeekStream() {
@@ -409,33 +387,38 @@ class _AdminDashboardState extends State<AdminDashboard> {
               delegate: SliverChildListDelegate([
                 Row(
                   children: [
+                    // 🔵 LEFT: Active Members pie showing Active / Total Clients (tap to open details page)
                     Expanded(
                       child: StreamBuilder<int>(
                         stream: _activeMembersStream(),
                         builder: (context, snap) {
-                          if (!snap.hasData) {
-                            return _buildPieChartCard(
-                              title: 'Active Members',
-                              value: '—',
-                              subtitle: 'Active',
-                              percentage: 0,
-                              color: Colors.blue,
-                            );
-                          }
-                          final activeCount = snap.data!;
+                          final activeCount = snap.data ?? 0;
 
                           return FutureBuilder<QuerySnapshot>(
                             future: _fs.collection('users').where('role', isEqualTo: 'client').get(),
                             builder: (context, usersSnap) {
                               final totalClients = usersSnap.data?.docs.length ?? 0;
-                              final pct = totalClients == 0 ? 0.0 : (activeCount / totalClients).clamp(0.0, 1.0);
+                              final pct = totalClients == 0
+                                  ? 0.0
+                                  : (activeCount / totalClients).clamp(0.0, 1.0);
 
-                              return _buildPieChartCard(
-                                title: 'Active Members',
-                                value: activeCount.toString(),
-                                subtitle: 'Active',
-                                percentage: pct,
-                                color: Colors.blue,
+                              return InkWell(
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => const ActiveMembersScreen(),
+                                    ),
+                                  );
+                                },
+                                borderRadius: BorderRadius.circular(12),
+                                child: _buildPieChartCard(
+                                  title: 'Active Members',
+                                  value: activeCount.toString(),
+                                  subtitle: totalClients > 0 ? 'of $totalClients' : 'Active',
+                                  percentage: pct,
+                                  color: Colors.indigo,
+                                ),
                               );
                             },
                           );
@@ -444,18 +427,34 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     ),
 
                     const SizedBox(width: 16),
+
+                    // 🟢 RIGHT: Schedule Slots pie (tap to see weekly details)
                     Expanded(
                       child: StreamBuilder<int>(
                         stream: _bookedThisWeekStream(),
                         builder: (context, snap) {
                           final booked = snap.data ?? 0;
                           final pct = _totalSlotsThisWeek == 0 ? 0.0 : (booked / _totalSlotsThisWeek).clamp(0.0, 1.0);
-                          return _buildPieChartCard(
-                            title: 'Schedule Slots',
-                            value: booked.toString(),
-                            subtitle: 'Booked',
-                            percentage: pct,
-                            color: Colors.green,
+
+                          return GestureDetector(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => ScheduleSlotsDetailScreen(
+                                    weekStart: _weekStart,
+                                    nextWeekStart: _nextWeekStart,
+                                  ),
+                                ),
+                              );
+                            },
+                            child: _buildPieChartCard(
+                              title: 'Schedule Slots',
+                              value: booked.toString(),
+                              subtitle: 'Booked',
+                              percentage: pct,
+                              color: Colors.green,
+                            ),
                           );
                         },
                       ),
@@ -652,8 +651,249 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 }
 
-class _ActiveData {
-  final int active;
-  final int total;
-  _ActiveData({required this.active, required this.total});
+// ===== New Schedule Slots Detail Screen (kept from your version) =====
+class ScheduleSlotsDetailScreen extends StatefulWidget {
+  final DateTime weekStart;
+  final DateTime nextWeekStart;
+
+  const ScheduleSlotsDetailScreen({
+    super.key,
+    required this.weekStart,
+    required this.nextWeekStart,
+  });
+
+  @override
+  State<ScheduleSlotsDetailScreen> createState() => _ScheduleSlotsDetailScreenState();
+}
+
+class _ScheduleSlotsDetailScreenState extends State<ScheduleSlotsDetailScreen> {
+  final FirebaseFirestore _fs = FirebaseFirestore.instance;
+  List<SlotDetail> _slots = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchSlots();
+  }
+
+  Future<void> _fetchSlots() async {
+    try {
+      final querySnapshot = await _fs
+          .collection('trainer_slots')
+          .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(widget.weekStart))
+          .where('date', isLessThan: Timestamp.fromDate(widget.nextWeekStart))
+          .get();
+
+      List<SlotDetail> slots = [];
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+
+      for (var doc in querySnapshot.docs) {
+        final data = doc.data();
+        final Timestamp dateTimestamp = data['date'];
+        final DateTime date = dateTimestamp.toDate();
+        final String time = data['time'] ?? '00:00';
+        final int booked = data['booked'] ?? 0;
+
+        // Only include slots with actual bookings
+        if (booked > 0) {
+          // Parse the time string to get start and end times
+          final timeParts = time.split(' - ');
+          final startTime = timeParts.isNotEmpty ? timeParts[0] : '';
+          final endTime = timeParts.length > 1 ? timeParts[1] : '';
+
+          slots.add(SlotDetail(
+            date: date,
+            startTime: startTime,
+            endTime: endTime,
+            booked: booked,
+            isToday: date.year == today.year &&
+                date.month == today.month &&
+                date.day == today.day,
+            bookedNames: List<String>.from(data['booked_names'] ?? []),
+          ));
+        }
+      }
+
+      // Sort: today's first, then by date/time
+      slots.sort((a, b) {
+        if (a.isToday && !b.isToday) return -1;
+        if (!a.isToday && b.isToday) return 1;
+        final aDateTime = _parseSlotDateTime(a);
+        final bDateTime = _parseSlotDateTime(b);
+        return aDateTime.compareTo(bDateTime);
+      });
+
+      setState(() {
+        _slots = slots;
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint('Error fetching slots: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  DateTime _parseSlotDateTime(SlotDetail slot) {
+    final timeFormat = DateFormat.jm();
+    final time = timeFormat.parse(slot.startTime);
+    return DateTime(
+      slot.date.year,
+      slot.date.month,
+      slot.date.day,
+      time.hour,
+      time.minute,
+    );
+    }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Schedule Slots Details'),
+        backgroundColor: const Color(0xFF1C2D5E),
+        foregroundColor: Colors.white,
+        automaticallyImplyLeading: true,
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _slots.isEmpty
+              ? const Center(child: Text('No booked slots found for this week'))
+              : ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _slots.length,
+                  itemBuilder: (context, index) {
+                    final slot = _slots[index];
+                    return _buildSlotCard(slot);
+                  },
+                ),
+    );
+  }
+
+  Widget _buildSlotCard(SlotDetail slot) {
+    final dayFormat = DateFormat('EEEE, MMMM d');
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.08),
+            blurRadius: 6,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              if (slot.isToday)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text(
+                    'TODAY',
+                    style: TextStyle(
+                      color: Colors.blue,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  dayFormat.format(slot.date),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              const Icon(
+                Icons.access_time,
+                color: Color(0xFF1C2D5E),
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '${slot.startTime} - ${slot.endTime}',
+                  style: const TextStyle(fontSize: 15),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              const Icon(
+                Icons.event_seat,
+                color: Color(0xFF1C2D5E),
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${slot.booked} booked slot${slot.booked > 1 ? 's' : ''}',
+                style: const TextStyle(fontSize: 15),
+              ),
+            ],
+          ),
+          if (slot.bookedNames.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const Icon(
+                  Icons.people,
+                  color: Color(0xFF1C2D5E),
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Clients: ${slot.bookedNames.join(', ')}',
+                    style: const TextStyle(fontSize: 15),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class SlotDetail {
+  final DateTime date;
+  final String startTime;
+  final String endTime;
+  final int booked;
+  final bool isToday;
+  final List<String> bookedNames;
+
+  SlotDetail({
+    required this.date,
+    required this.startTime,
+    required this.endTime,
+    required this.booked,
+    required this.isToday,
+    required this.bookedNames,
+  });
 }
