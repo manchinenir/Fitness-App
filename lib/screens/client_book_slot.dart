@@ -150,6 +150,7 @@ class _ClientBookSlotState extends State<ClientBookSlot> {
     final todayMidnight = DateTime(now.year, now.month, now.day);
     final selectedMidnight = DateTime(date.year, date.month, date.day);
 
+    // ✅ FIX: Allow today and future dates, only block past dates
     if (selectedMidnight.isBefore(todayMidnight)) return [];
 
     final weekday = DateFormat('EEEE').format(date);
@@ -158,19 +159,26 @@ class _ClientBookSlotState extends State<ClientBookSlot> {
 
     for (final block in blocks) {
       if (isSameDay(date, now)) {
+        // For today, only show slots that haven't started yet
         DateTime currentTime = now;
         DateTime blockEnd = DateTime(date.year, date.month, date.day,
             int.parse(block['end']!.split(':')[0]), int.parse(block['end']!.split(':')[1]));
+        
         if (blockEnd.isAfter(currentTime)) {
           DateTime adjustedStart = currentTime.isAfter(DateTime(date.year, date.month, date.day,
                       int.parse(block['start']!.split(':')[0]), int.parse(block['start']!.split(':')[1])))
-              ? currentTime
-              : DateTime(date.year, date.month, date.day,
-                      int.parse(block['start']!.split(':')[0]), int.parse(block['start']!.split(':')[1]));
-          result.addAll(generateHourlySlots(
-              DateFormat("HH:mm").format(adjustedStart), block['end']!, date));
+                ? currentTime
+                : DateTime(date.year, date.month, date.day,
+                        int.parse(block['start']!.split(':')[0]), int.parse(block['start']!.split(':')[1]));
+          
+          // Ensure we don't generate slots in the past
+          if (adjustedStart.isBefore(blockEnd)) {
+            result.addAll(generateHourlySlots(
+                DateFormat("HH:mm").format(adjustedStart), block['end']!, date));
+          }
         }
       } else {
+        // ✅ FIX: For future dates, show ALL available slots
         result.addAll(generateHourlySlots(block['start']!, block['end']!, date));
       }
     }
@@ -179,9 +187,12 @@ class _ClientBookSlotState extends State<ClientBookSlot> {
 
   bool _isDateDisabled(DateTime date) {
     final today = DateTime.now();
-    return date.isBefore(DateTime(today.year, today.month, today.day));
+    final todayMidnight = DateTime(today.year, today.month, today.day);
+    final dateMidnight = DateTime(date.year, date.month, date.day);
+    
+    // ✅ FIX: Only disable past dates, enable today and future dates
+    return dateMidnight.isBefore(todayMidnight);
   }
-  
   Future<Map<String, Map<String, dynamic>>> getSlotStatuses(DateTime date, List<String> slots) async {
     Map<String, Map<String, dynamic>> statuses = {};
     final currentUser = FirebaseAuth.instance.currentUser;

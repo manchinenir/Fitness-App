@@ -801,8 +801,7 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> with SingleTicker
     );
   }
 
-  // Update the _refreshSessionCounts method to be more careful with new purchases:
-
+  // ✅ FIXED: Enhanced session counting that only counts PAST sessions as completed
   Future<void> _refreshSessionCounts() async {
     try {
       final userId = _auth.currentUser?.uid;
@@ -840,6 +839,7 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> with SingleTicker
 
         // Count ONLY COMPLETED sessions (past sessions where end time has passed)
         int completedSessionsInThisPurchase = 0;
+        int currentBookedSessions = 0;
         
         for (final slotDoc in slotsSnapshot.docs) {
           try {
@@ -859,7 +859,7 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> with SingleTicker
                   slotDate.day,
                   endTime.hour,
                   endTime.minute,
-                );
+                ).toUtc();
               } catch (e) {
                 continue;
               }
@@ -873,15 +873,19 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> with SingleTicker
                                         userPurchaseMap[userId] == purchaseId;
 
             if (belongsToThisPurchase) {
-              // Check slot status - ignore cancelled slots
+              // Check slot status
               final statusByUser = Map<String, dynamic>.from(slotData['status_by_user'] ?? {});
               final userSlotStatus = statusByUser[userId] as String?;
               final isCancelled = userSlotStatus == 'Cancelled';
+              final isCompleted = userSlotStatus == 'Completed';
               
               if (!isCancelled) {
-                // ✅ Count as completed if the slot end time has passed
-                if (slotEndTime.isBefore(now)) {
+                if (isCompleted || slotEndTime.isBefore(now)) {
+                  // Count as completed (session end time has passed OR marked as completed)
                   completedSessionsInThisPurchase++;
+                } else {
+                  // Count as currently booked (upcoming session)
+                  currentBookedSessions++;
                 }
               }
             }
@@ -900,11 +904,13 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> with SingleTicker
         // Check if update is needed
         final currentUsed = purchaseData['usedSessions'] as int? ?? 0;
         final currentRemaining = purchaseData['remainingSessions'] as int? ?? totalSessions;
+        final currentBooked = purchaseData['bookedSessions'] as int? ?? 0;
         final currentStatus = purchaseData['status'] as String? ?? 'active';
         final currentIsActive = purchaseData['isActive'] as bool? ?? true;
         
         bool needsUpdate = currentUsed != completedSessionsInThisPurchase || 
                           currentRemaining != remainingSessions ||
+                          currentBooked != currentBookedSessions ||
                           currentStatus != newStatus ||
                           currentIsActive != isActive;
 
@@ -913,6 +919,8 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> with SingleTicker
           Map<String, dynamic> updateData = {
             'usedSessions': completedSessionsInThisPurchase,
             'remainingSessions': remainingSessions,
+            'bookedSessions': currentBookedSessions, // Update booked sessions count
+            'availableSessions': totalSessions - currentBookedSessions, // Recalculate available
             'isActive': isActive,
             'status': newStatus,
             'updatedAt': FieldValue.serverTimestamp(),
@@ -926,6 +934,12 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> with SingleTicker
           }
 
           batch.update(purchaseDoc.reference, updateData);
+          
+          print('🔄 Updated purchase ${purchaseData['planName']}: '
+              'Used: $completedSessionsInThisPurchase, '
+              'Booked: $currentBookedSessions, '
+              'Remaining: $remainingSessions, '
+              'Status: $newStatus');
         }
       }
 

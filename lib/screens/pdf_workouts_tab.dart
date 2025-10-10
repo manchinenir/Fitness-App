@@ -138,6 +138,23 @@ class _PDFWorkoutsTabState extends State<PDFWorkoutsTab> {
     }
   }
 
+  // ---------------- NEW: helper to fetch current user's name/email ----------------
+  Future<Map<String, String>> _getCurrentUserProfile() async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return {'name': '', 'email': ''};
+
+    try {
+      final doc = await _firestore.collection('users').doc(uid).get();
+      final data = doc.data() ?? {};
+      final name = (data['name'] ?? '').toString();
+      final email = (data['email'] ?? _auth.currentUser?.email ?? '').toString();
+      return {'name': name, 'email': email};
+    } catch (_) {
+      return {'name': '', 'email': _auth.currentUser?.email ?? ''};
+    }
+  }
+  // -------------------------------------------------------------------------------
+
   void _showSubscriptionRequiredDialog() {
     showDialog(
       context: context,
@@ -233,19 +250,41 @@ class _PDFWorkoutsTabState extends State<PDFWorkoutsTab> {
       final now = _getCurrentLocalTime();
       final endDate = _addDaysToLocalTime(now, 30); // 30-day subscription
 
-      await _firestore.collection('client_subscriptions').add({
+      // NEW: get user name + email to store with the subscription
+      final profile = await _getCurrentUserProfile();
+      final userName = profile['name'] ?? '';
+      final userEmail = profile['email'] ?? '';
+
+      // Write to client_subscriptions (mark clearly as a PDF subscription)
+      final subRef = await _firestore.collection('client_subscriptions').add({
         'userId': userId,
+        'userName': userName,               // <-- added
+        'userEmail': userEmail,             // <-- added
         'planName': 'PDF Workouts Monthly Subscription',
         'price': 29.99,
         'purchaseDate': _convertToLocalTimeString(now), // Save as local time string
-        'startDate': _convertToLocalTimeString(now), // Save as local time string
-        'endDate': _convertToLocalTimeString(endDate), // Save as local time string
+        'startDate': _convertToLocalTimeString(now),    // Save as local time string
+        'endDate': _convertToLocalTimeString(endDate),  // Save as local time string
         'isActive': true,
         'status': 'active',
         'paymentMethod': 'square',
         'paymentStatus': 'completed',
         'timezone': 'Local/Device', // Track that we're using local time
         'createdAt': FieldValue.serverTimestamp(), // Server timestamp for ordering
+        'type': 'pdf',               // <-- tag as PDF sub
+        'isPdf': true,               // <-- easy filter flag
+      });
+
+      // Also mirror into a helper collection for admin listing
+      await _firestore.collection('pdf_subscribers').doc(subRef.id).set({
+        'userId': userId,
+        'userName': userName,
+        'userEmail': userEmail,
+        'startDate': _convertToLocalTimeString(now),
+        'endDate': _convertToLocalTimeString(endDate),
+        'isActive': true,
+        'status': 'active',
+        'createdAt': FieldValue.serverTimestamp(),
       });
 
       await _checkSubscriptionStatus();
