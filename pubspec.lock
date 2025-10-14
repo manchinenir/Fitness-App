@@ -338,7 +338,7 @@ packages:
     source: hosted
     version: "1.1.1"
   fl_chart:
-    dependency: "direct dev"
+    dependency: "direct main"
     description:
       name: fl_chart
       sha256: c1e26c7e48496be85104c16c040950b0436674cdf0737f3f6e95511b2529b592
@@ -351,7 +351,7 @@ packages:
     source: sdk
     version: "0.0.0"
   flutter_launcher_icons:
-    dependency: "direct main"
+    dependency: "direct dev"
     description:
       name: flutter_launcher_icons
       sha256: "526faf84284b86a4cb36d20a5e45147747b7563d921373d4ee0559c54fcdbcea"
@@ -593,7 +593,7 @@ packages:
     source: hosted
     version: "1.0.0"
   open_file:
-    dependency: "direct dev"
+    dependency: "direct main"
     description:
       name: open_file
       sha256: d17e2bddf5b278cb2ae18393d0496aa4f162142ba97d1a9e0c30d476adf99c0e
@@ -721,7 +721,7 @@ packages:
     source: hosted
     version: "2.3.0"
   pdf:
-    dependency: "direct dev"
+    dependency: "direct main"
     description:
       name: pdf
       sha256: "28eacad99bffcce2e05bba24e50153890ad0255294f4dd78a17075a2ba5c8416"
@@ -737,7 +737,7 @@ packages:
     source: hosted
     version: "1.0.4"
   percent_indicator:
-    dependency: "direct dev"
+    dependency: "direct main"
     description:
       name: percent_indicator
       sha256: "157d29133bbc6ecb11f923d36e7960a96a3f28837549a20b65e5135729f0f9fd"
@@ -777,7 +777,7 @@ packages:
     source: hosted
     version: "6.0.2"
   printing:
-    dependency: "direct dev"
+    dependency: "direct main"
     description:
       name: printing
       sha256: "482cd5a5196008f984bb43ed0e47cbfdca7373490b62f3b27b3299275bf22a93"

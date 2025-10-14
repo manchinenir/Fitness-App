@@ -688,6 +688,7 @@ class _ScheduleSlotsDetailScreenState extends State<ScheduleSlotsDetailScreen> {
       List<SlotDetail> slots = [];
       final now = DateTime.now();
       final today = DateTime(now.year, now.month, now.day);
+      final fmt = DateFormat('HH:mm');
 
       for (var doc in querySnapshot.docs) {
         final data = doc.data();
@@ -700,29 +701,46 @@ class _ScheduleSlotsDetailScreenState extends State<ScheduleSlotsDetailScreen> {
         if (booked > 0) {
           // Parse the time string to get start and end times
           final timeParts = time.split(' - ');
-          final startTime = timeParts.isNotEmpty ? timeParts[0] : '';
-          final endTime = timeParts.length > 1 ? timeParts[1] : '';
+          final startTimeStr = timeParts.isNotEmpty ? timeParts[0] : '00:00';
+          String endTimeStr = timeParts.length > 1 ? timeParts[1] : '';
+          if (endTimeStr.isEmpty) {
+            final startParsed = fmt.parse(startTimeStr);
+            final nextHour = startParsed.add(const Duration(hours: 1));
+            endTimeStr = DateFormat('HH:mm').format(nextHour);
+          }
+
+          String status;
+          if (date.isBefore(today)) {
+            status = 'COMPLETED';
+          } else if (date.isAfter(today)) {
+            status = 'UPCOMING';
+          } else {
+            status = 'TODAY';
+          }
 
           slots.add(SlotDetail(
             date: date,
-            startTime: startTime,
-            endTime: endTime,
+            startTime: startTimeStr,
+            endTime: endTimeStr,
             booked: booked,
-            isToday: date.year == today.year &&
-                date.month == today.month &&
-                date.day == today.day,
+            status: status,
             bookedNames: List<String>.from(data['booked_names'] ?? []),
           ));
         }
       }
 
-      // Sort: today's first, then by date/time
+      // Sort: by status order first (TODAY, UPCOMING, COMPLETED), then by date/time
       slots.sort((a, b) {
-        if (a.isToday && !b.isToday) return -1;
-        if (!a.isToday && b.isToday) return 1;
+        final orderA = _getOrder(a.status);
+        final orderB = _getOrder(b.status);
+        if (orderA != orderB) return orderA.compareTo(orderB);
         final aDateTime = _parseSlotDateTime(a);
         final bDateTime = _parseSlotDateTime(b);
-        return aDateTime.compareTo(bDateTime);
+        if (a.status == 'COMPLETED') {
+          return bDateTime.compareTo(aDateTime); // desc for completed
+        } else {
+          return aDateTime.compareTo(bDateTime); // asc for others
+        }
       });
 
       setState(() {
@@ -737,8 +755,21 @@ class _ScheduleSlotsDetailScreenState extends State<ScheduleSlotsDetailScreen> {
     }
   }
 
+  int _getOrder(String status) {
+    switch (status) {
+      case 'TODAY':
+        return 0;
+      case 'UPCOMING':
+        return 1;
+      case 'COMPLETED':
+        return 2;
+      default:
+        return 1;
+    }
+  }
+
   DateTime _parseSlotDateTime(SlotDetail slot) {
-    final timeFormat = DateFormat.jm();
+    final timeFormat = DateFormat('HH:mm');
     final time = timeFormat.parse(slot.startTime);
     return DateTime(
       slot.date.year,
@@ -747,7 +778,7 @@ class _ScheduleSlotsDetailScreenState extends State<ScheduleSlotsDetailScreen> {
       time.hour,
       time.minute,
     );
-    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -775,6 +806,8 @@ class _ScheduleSlotsDetailScreenState extends State<ScheduleSlotsDetailScreen> {
 
   Widget _buildSlotCard(SlotDetail slot) {
     final dayFormat = DateFormat('EEEE, MMMM d');
+    final Color badgeColor = _getBadgeColor(slot.status);
+    final Color textColor = _getBadgeTextColor(slot.status);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -795,22 +828,21 @@ class _ScheduleSlotsDetailScreenState extends State<ScheduleSlotsDetailScreen> {
         children: [
           Row(
             children: [
-              if (slot.isToday)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Text(
-                    'TODAY',
-                    style: TextStyle(
-                      color: Colors.blue,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                    ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: badgeColor.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  slot.status,
+                  style: TextStyle(
+                    color: textColor,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
                   ),
                 ),
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -878,6 +910,32 @@ class _ScheduleSlotsDetailScreenState extends State<ScheduleSlotsDetailScreen> {
       ),
     );
   }
+
+  Color _getBadgeColor(String status) {
+    switch (status) {
+      case 'COMPLETED':
+        return Colors.red;
+      case 'TODAY':
+        return Colors.blue;
+      case 'UPCOMING':
+        return Colors.green;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  Color _getBadgeTextColor(String status) {
+    switch (status) {
+      case 'COMPLETED':
+        return Colors.red;
+      case 'TODAY':
+        return Colors.blue;
+      case 'UPCOMING':
+        return Colors.green;
+      default:
+        return Colors.grey;
+    }
+  }
 }
 
 class SlotDetail {
@@ -885,7 +943,7 @@ class SlotDetail {
   final String startTime;
   final String endTime;
   final int booked;
-  final bool isToday;
+  final String status;
   final List<String> bookedNames;
 
   SlotDetail({
@@ -893,7 +951,7 @@ class SlotDetail {
     required this.startTime,
     required this.endTime,
     required this.booked,
-    required this.isToday,
+    required this.status,
     required this.bookedNames,
   });
 }

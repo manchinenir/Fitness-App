@@ -58,17 +58,20 @@ class _AdminWorkoutScreenState extends State<AdminWorkoutScreen> with SingleTick
   final List<String> _muscleGroups = [
     'Back', 'Chest', 'Legs', 'Shoulder', 'Triceps', 'Biceps', 'Arms', 'Glute', 'Full Body'
   ];
-  final Map<String, IconData> _muscleGroupIcons = {
-    'Back': Icons.accessibility_new,
-    'Chest': Icons.fitness_center,
-    'Legs': Icons.directions_run,
-    'Shoulder': Icons.arrow_upward,
-    'Triceps': Icons.open_with,
-    'Biceps': Icons.fitness_center,
-    'Arms': Icons.fitness_center,
-    'Glute': Icons.woman,
-    'Full Body': Icons.self_improvement
+  
+  // Updated muscle group emojis - arranged as requested
+  final Map<String, String> _muscleGroupEmojis = {
+    'Back': '🏋🏻', // Weight lifter for back
+    'Chest': '🏃🏼‍♀️', // Female runner for chest (CHANGED)
+    'Legs': '🦵', // Leg for squats and lunges
+    'Shoulder': '⬆️', // Upward arrow for shoulder presses
+    'Triceps': '📉', // Downward arrow for tricep extensions
+    'Biceps': '📈', // Upward arrow for bicep curls
+    'Arms': '💪', // Flexed bicep for arm strength
+    'Glute': '🏋🏻‍♀️', // Female weight lifter for glute
+    'Full Body': '🧍‍♂️' // Standing person for full body workouts
   };
+
   final Map<String, List<String>> _selectedCustomWorkouts = {};
   final Map<String, List<String>> _predefinedWorkouts = {
     'Back': [
@@ -144,7 +147,7 @@ class _AdminWorkoutScreenState extends State<AdminWorkoutScreen> with SingleTick
       'Barbell Squat 3x10',
       'Dumbbell RDLs 3x15'
     ],
-    'Arms': [  // Remove the trailing space
+    'Arms': [
     'Dumbbell Forward Lunge 3x10 (25lb)',
     'Barbell Squat 3x10 (135lb)',
     'Leg Extension 3x15 (100lb)',
@@ -393,8 +396,28 @@ class _AdminWorkoutScreenState extends State<AdminWorkoutScreen> with SingleTick
               insets: const EdgeInsets.symmetric(horizontal: 16),
             ),
             tabs: _muscleGroups.map((group) => Tab(
-              icon: Icon(_muscleGroupIcons[group]),
-              text: group,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (group == 'Chest')
+                    Image.asset(
+                      'assets/images/chest.png',
+                      width: 18,
+                      height: 18,
+                      fit: BoxFit.contain,
+                    )
+                  else
+                    Text(
+                      _muscleGroupEmojis[group]!,
+                      style: const TextStyle(fontSize: 18),
+                    ),
+                  const SizedBox(width: 6),
+                  Text(
+                    group,
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
             )).toList(),
           ),
         ),

@@ -156,12 +156,11 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
       return slotDate.add(Duration(hours: 1));
     }
   }
-  // ✅ FIXED: Check against actual session end time, not booking time
-  // ✅ FIXED: Enhanced method to mark past sessions as completed
+  
+  // ✅ FIXED: Enhanced method to handle past sessions with proper session counting
   Future<void> _markPastSessionsAsCompleted() async {
     try {
-      final nowLocal = DateTime.now(); // use local time instead of UTC
-
+      final nowLocal = DateTime.now();
       print('🕒 Checking for past sessions at: ${nowLocal.toLocal()}');
 
       final allSlotsSnapshot = await FirebaseFirestore.instance
@@ -198,8 +197,10 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
                 : userPurchaseMap[clientId];
             final userStatus = statusByUser[clientId] as String?;
 
+            // Only process if session is still confirmed/rescheduled (not already completed)
             if ((userStatus == 'Confirmed' || userStatus == 'Rescheduled') &&
                 purchaseId != null) {
+              
               final purchaseDoc = await FirebaseFirestore.instance
                   .collection('client_purchases')
                   .doc(purchaseId)
@@ -207,32 +208,33 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
 
               if (purchaseDoc.exists) {
                 final purchaseData = purchaseDoc.data()!;
-                final currentBooked =
-                    (purchaseData['bookedSessions'] as num?)?.toInt() ?? 0;
-                final currentUsed =
-                    (purchaseData['usedSessions'] as num?)?.toInt() ?? 0;
-                final totalSessions =
-                    (purchaseData['totalSessions'] as num?)?.toInt() ?? 0;
+                final currentBooked = (purchaseData['bookedSessions'] as num?)?.toInt() ?? 0;
+                final currentUsed = (purchaseData['usedSessions'] as num?)?.toInt() ?? 0;
+                final totalSessions = (purchaseData['totalSessions'] as num?)?.toInt() ?? 0;
 
                 if (currentBooked > 0) {
-                  final newBookedCount = currentBooked - 1;
-                  final newUsedSessions = currentUsed + 1;
-                  final newAvailableSessions = totalSessions - newBookedCount;
+                  // ✅ CORRECTED: Decrement booked sessions and increment used sessions
+                  final newBookedSessions = currentBooked; // DECREMENT booked
+                  final newUsedSessions = currentUsed + 1; // INCREMENT used
                   final newRemainingSessions = totalSessions - newUsedSessions;
+                  final newAvailableSessions = totalSessions - newBookedSessions;
 
                   batch.update(purchaseDoc.reference, {
-                    'bookedSessions': newBookedCount,
+                    'bookedSessions': newBookedSessions,
                     'usedSessions': newUsedSessions,
-                    'availableSessions': newAvailableSessions,
                     'remainingSessions': newRemainingSessions,
+                    'availableSessions': newAvailableSessions,
                     'updatedAt': FieldValue.serverTimestamp(),
                   });
 
+                  // Mark session as completed
                   statusByUser[clientId] = 'Completed';
                   hasUpdates = true;
 
                   print(
-                      '✅ Marked session completed for $clientId (purchase $purchaseId)');
+                      '✅ Marked session completed for $clientId (purchase $purchaseId) - '
+                      'Booked: $newBookedSessions, Used: $newUsedSessions, '
+                      'Remaining: $newRemainingSessions');
                 }
               }
             }
@@ -255,9 +257,185 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
       print('❌ Error marking past sessions: $e');
     }
   }
+  DateTime _parseSlotDateTime(String slotTime, DateTime baseDate) {
+    try {
+      // Example: "5:30 AM - 6:30 AM" → we want the "5:30 AM" part (start time)
+      final startTimeStr = slotTime.split(' - ')[0].trim();
+      final startTime = DateFormat.jm().parse(startTimeStr);
+      
+      return DateTime(
+        baseDate.year,
+        baseDate.month,
+        baseDate.day,
+        startTime.hour,
+        startTime.minute,
+      );
+    } catch (e) {
+      // Fallback to base date if parsing fails
+      return baseDate;
+    }
+  }
+  Future<String?> _findAppropriatePurchaseId(String userId) async {
+    try {
+      final purchasesSnapshot = await FirebaseFirestore.instance
+          .collection('client_purchases')
+          .where('userId', isEqualTo: userId)
+          .where('status', isEqualTo: 'active')
+          .get();
 
+      if (purchasesSnapshot.docs.isEmpty) return null;
+
+      final purchases = purchasesSnapshot.docs.map((doc) {
+        final data = doc.data();
+        return {
+          'purchaseId': doc.id,
+          'purchaseDate': (data['purchaseDate'] as Timestamp?)?.toDate() ?? DateTime(1970),
+          'totalSessions': data['totalSessions'] as int? ?? 0,
+          'bookedSessions': (data['bookedSessions'] as num?)?.toInt() ?? 0,
+          'usedSessions': (data['usedSessions'] as num?)?.toInt() ?? 0,
+          'availableSessions': (data['totalSessions'] as int? ?? 0) - 
+                            ((data['bookedSessions'] as num?)?.toInt() ?? 0) - 
+                            ((data['usedSessions'] as num?)?.toInt() ?? 0),
+        };
+      }).toList();
+
+      // Sort by purchase date (oldest first) - FIFO
+      purchases.sort((a, b) => (a['purchaseDate'] as DateTime).compareTo(b['purchaseDate'] as DateTime));
+
+      // Find the first purchase with available sessions
+      for (var purchase in purchases) {
+        if ((purchase['availableSessions'] as int) > 0) {
+          return purchase['purchaseId'] as String;
+        }
+      }
+
+      // If no purchases have available sessions, return the oldest one
+      return purchases.isNotEmpty ? purchases[0]['purchaseId'] as String : null;
+    } catch (e) {
+      print('❌ Error finding appropriate purchase: $e');
+      return null;
+    }
+  }
+
+  void _showPastSlotViewDialog(String docId) {
+    final currentSlotData = _firestoreSlots[docId];
+    final List<String> bookedNames = currentSlotData != null 
+        ? List<String>.from(currentSlotData['booked_names'] ?? [])
+        : [];
+    final List<String> bookedEmails = currentSlotData != null
+        ? List<String>.from(currentSlotData['booked_emails'] ?? [])
+        : [];
+    final Map<String, dynamic> statusByUser = currentSlotData != null
+        ? Map<String, dynamic>.from(currentSlotData['status_by_user'] ?? {})
+        : {};
+
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        elevation: 4,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+            const Text("Past Session Details - View Only",  // Added "View Only" to make it clear
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1C2D5E))),
+              const SizedBox(height: 8),
+              Text("Time: ${docId.split('|')[1]}",
+                  style: const TextStyle(fontSize: 16, color: Colors.grey)),
+              Text("Date: ${DateFormat('MMMM d, yyyy').format(_selectedDay)}",
+                  style: const TextStyle(fontSize: 14, color: Colors.grey)),
+              
+              const SizedBox(height: 20),
+              const Text("Booked Clients:", style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              
+              if (bookedNames.isEmpty) 
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 20),
+                  child: Center(
+                    child: Text(
+                      "No bookings for this session",
+                      style: TextStyle(color: Colors.grey, fontSize: 16),
+                    ),
+                  ),
+                )
+              else
+                SizedBox(
+                  height: 200,
+                  child: ListView.builder(
+                    itemCount: bookedNames.length,
+                    itemBuilder: (context, index) {
+                      final clientId = currentSlotData != null && 
+                                      index < (currentSlotData['booked_by']?.length ?? 0)
+                          ? (currentSlotData['booked_by'] as List)[index]
+                          : '';
+                      
+                      final originalStatus = clientId.isNotEmpty ? statusByUser[clientId] ?? 'Confirmed' : 'Confirmed';
+
+                      final status = originalStatus == 'Cancelled' ? 'Cancelled' : 'Completed';
+                      final statusColor = originalStatus == 'Cancelled' ? Colors.red : Colors.green;
+                      
+                      return ListTile(
+                        leading: Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            color: statusColor,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        title: Text(bookedNames[index]),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(bookedEmails.length > index ? bookedEmails[index] : ''),
+                            Text(
+                              'Status: $status',
+                              style: TextStyle(
+                                color: statusColor,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              
+              const SizedBox(height: 24),
+              Center(
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1C2D5E),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("CLOSE"),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
   // ✅ FIXED: Enhanced booking dialog with proper session tracking
   void _bookForClientDialog(String docId) async {
+    final slotTime = docId.split('|')[1];
+    final isPastSlot = _isPastSlot(slotTime, _selectedDay);
+    
+    if (isPastSlot) {
+      // Show view-only dialog for past slots
+      _showPastSlotViewDialog(docId);
+      return;
+    }
+
     List<Map<String, dynamic>> clients = [];
     Map<String, bool> selectedClients = {};
     Map<String, String> selectedPurchaseIds = {};
@@ -275,15 +453,13 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
           .where('status', isEqualTo: 'active')
           .get();
 
-      // Extract unique user IDs from active purchases
-      final activeUserIds = <String>{};
+      // Organize purchases by user with proper session tracking
       final userPurchasesMap = <String, List<Map<String, dynamic>>>{};
       
       for (var purchaseDoc in activePurchasesSnapshot.docs) {
         final purchaseData = purchaseDoc.data();
         final userId = purchaseData['userId'] as String?;
         if (userId != null) {
-          activeUserIds.add(userId);
           if (!userPurchasesMap.containsKey(userId)) {
             userPurchasesMap[userId] = [];
           }
@@ -291,18 +467,21 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
           // Calculate available sessions correctly
           final totalSessions = purchaseData['totalSessions'] as int? ?? 0;
           final bookedSessions = purchaseData['bookedSessions'] as int? ?? 0;
+          final usedSessions = purchaseData['usedSessions'] as int? ?? 0;
           final availableSessions = totalSessions - bookedSessions;
           
           userPurchasesMap[userId]!.add({
             ...purchaseData,
             'purchaseId': purchaseDoc.id,
             'availableSessions': availableSessions,
+            'remainingSessions': totalSessions - usedSessions,
+            'planIndex': userPurchasesMap[userId]!.length, // Track order
           });
         }
       }
 
       // If no active clients, show message and return
-      if (activeUserIds.isEmpty) {
+      if (userPurchasesMap.isEmpty) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("No clients with active plans found")),
@@ -314,7 +493,7 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
       final usersSnapshot = await FirebaseFirestore.instance
           .collection('users')
           .where('role', isEqualTo: 'client')
-          .where(FieldPath.documentId, whereIn: activeUserIds.toList())
+          .where(FieldPath.documentId, whereIn: userPurchasesMap.keys.toList())
           .get();
 
       clients = usersSnapshot.docs.map((doc) {
@@ -322,15 +501,36 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
         final userId = doc.id;
         final userPurchases = userPurchasesMap[userId] ?? [];
         
-        // Sort purchases by available sessions (most available first)
+        // ✅ FIXED: Sort purchases by purchase date (oldest first) - FIFO
         userPurchases.sort((a, b) {
-          final aAvailable = a['availableSessions'] as int;
-          final bAvailable = b['availableSessions'] as int;
-          return bAvailable.compareTo(aAvailable);
+          final dateA = (a['purchaseDate'] as Timestamp?)?.toDate() ?? DateTime(1970);
+          final dateB = (b['purchaseDate'] as Timestamp?)?.toDate() ?? DateTime(1970);
+          return dateA.compareTo(dateB);
         });
 
-        final bestPurchase = userPurchases.isNotEmpty ? userPurchases.first : null;
+        // ✅ FIXED: Find the appropriate purchase for this client
+        // This automatically progresses through plans as they get filled
+        Map<String, dynamic>? selectedPurchase;
+        int selectedPurchaseIndex = -1;
         
+        for (int i = 0; i < userPurchases.length; i++) {
+          final purchase = userPurchases[i];
+          final availableSessions = purchase['availableSessions'] as int;
+          
+          // If this purchase has available sessions, use it
+          if (availableSessions > 0) {
+            selectedPurchase = purchase;
+            selectedPurchaseIndex = i;
+            break;
+          }
+        }
+        
+        // If no purchase has available sessions, use the first one (for display)
+        if (selectedPurchase == null && userPurchases.isNotEmpty) {
+          selectedPurchase = userPurchases[0];
+          selectedPurchaseIndex = 0;
+        }
+
         // Check if client is already booked for this slot
         final isAlreadyBooked = alreadyBookedClientIds.contains(userId);
         
@@ -338,17 +538,19 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
           'uid': userId,
           'name': data['name'] ?? 'No name',
           'email': data['email'] ?? '',
-          'availablePurchases': userPurchases,
-          'bestPurchaseId': bestPurchase?['purchaseId'],
-          'bestPurchaseAvailable': bestPurchase?['availableSessions'] ?? 0,
-          'bestPurchaseName': bestPurchase?['planName'] ?? 'No Plan',
+          'allPurchases': userPurchases, // All available purchases
+          'selectedPurchase': selectedPurchase,
+          'selectedPurchaseIndex': selectedPurchaseIndex,
+          'availableSessions': selectedPurchase?['availableSessions'] ?? 0,
+          'planName': selectedPurchase?['planName'] ?? 'No Plan',
           'isAlreadyBooked': isAlreadyBooked,
+          'hasMultiplePlans': userPurchases.length > 1,
         };
       }).toList();
 
       // Filter out clients with no available sessions (unless they're already booked)
       clients = clients.where((client) {
-        final availableSessions = client['bestPurchaseAvailable'] as int;
+        final availableSessions = client['availableSessions'] as int;
         final isAlreadyBooked = client['isAlreadyBooked'] as bool;
         // Keep clients who have available sessions OR are already booked (to show them)
         return availableSessions > 0 || isAlreadyBooked;
@@ -363,7 +565,7 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
       // ✅ FIXED: Also pre-populate purchase IDs for already booked clients
       for (var client in clients) {
         if (client['isAlreadyBooked'] as bool) {
-          selectedPurchaseIds[client['uid']] = client['bestPurchaseId'];
+          selectedPurchaseIds[client['uid']] = client['selectedPurchase']?['purchaseId'];
         }
       }
     } catch (e) {
@@ -417,9 +619,11 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
                             itemCount: clients.length,
                             itemBuilder: (context, index) {
                               final client = clients[index];
-                              final availableSessions = client['bestPurchaseAvailable'] as int;
-                              final planName = client['bestPurchaseName'] as String;
+                              final availableSessions = client['availableSessions'] as int;
+                              final planName = client['planName'] as String;
                               final isAlreadyBooked = client['isAlreadyBooked'] as bool;
+                              final hasMultiplePlans = client['hasMultiplePlans'] as bool;
+                              final allPurchases = client['allPurchases'] as List<Map<String, dynamic>>;
                               
                               return CheckboxListTile(
                                 title: Row(
@@ -429,6 +633,10 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
                                       const SizedBox(width: 8),
                                       const Icon(Icons.check_circle, color: Colors.green, size: 16),
                                     ],
+                                    if (hasMultiplePlans) ...[
+                                      const SizedBox(width: 8),
+                                      const Icon(Icons.layers, color: Colors.blue, size: 16),
+                                    ],
                                   ],
                                 ),
                                 subtitle: Column(
@@ -436,12 +644,17 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
                                   children: [
                                     Text(client['email']),
                                     Text(
-                                      '$availableSessions session${availableSessions != 1 ? 's' : ''} available',
+                                      '$availableSessions session${availableSessions != 1 ? 's' : ''} available in $planName',
                                       style: TextStyle(
                                         color: availableSessions > 0 ? Colors.green : Colors.red,
                                         fontSize: 12,
                                       ),
                                     ),
+                                    if (hasMultiplePlans) 
+                                      Text(
+                                        '${allPurchases.length} active plan${allPurchases.length != 1 ? 's' : ''}',
+                                        style: const TextStyle(fontSize: 10, color: Colors.blue),
+                                      ),
                                   ],
                                 ),
                                 value: selectedClients[client['uid']] ?? false,
@@ -453,7 +666,8 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
                                   setStateDialog(() {
                                     selectedClients[client['uid']] = v ?? false;
                                     if (v == true) {
-                                      selectedPurchaseIds[client['uid']] = client['bestPurchaseId'];
+                                      // ✅ FIXED: Always use the appropriate purchase (automatically progresses)
+                                      selectedPurchaseIds[client['uid']] = client['selectedPurchase']?['purchaseId'];
                                     } else {
                                       selectedPurchaseIds.remove(client['uid']);
                                     }
@@ -595,8 +809,9 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
                                 statusByUser[clientId] = 'Confirmed';
                               }
 
-                              // ✅ CRITICAL FIX: Parse the slot time to get exact end time
+                              // Parse slot times
                               final slotTime = docId.split('|')[1];
+                              final slotDateTime = _parseSlotDateTime(slotTime, _selectedDay);
                               final slotEndTime = _parseSlotEndTime(slotTime, _selectedDay);
 
                               final fullData = {
@@ -612,39 +827,33 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
                                 'status': 'Confirmed',
                                 'time': slotTime,
                                 'date': Timestamp.fromDate(DateTime(
-                                  _selectedDay.year, _selectedDay.month, _selectedDay.day,
-                                )),
-                                'slot_end_time': Timestamp.fromDate(slotEndTime.toUtc()),
-                                'date_time': Timestamp.fromDate(DateTime(
                                   _selectedDay.year,
                                   _selectedDay.month,
                                   _selectedDay.day,
+                                  slotDateTime.hour,
+                                  slotDateTime.minute,
                                 ).toUtc()),
 
+                                'date_time': '${DateFormat('MMMM d, yyyy').format(slotDateTime)} at ${DateFormat('h:mm a').format(slotDateTime)}',
+                                'slot_end_time': Timestamp.fromDate(slotEndTime.toUtc()),
                                 'last_updated': FieldValue.serverTimestamp(),
-                                // ✅ ADD THIS CRITICAL FIELD:
-                                'client_user_ids': bookedBy, // Explicit array for easy client detection
+                                'client_user_ids': bookedBy,
                               };
 
                               txn.set(slotRef, fullData);
                             });
 
-                            // The session counts will be updated automatically when session time passes
-                            for (var clientId in newClientIds) {
-                              // Notify user document (optional)
-                              await FirebaseFirestore.instance
-                                  .collection('users')
-                                  .doc(clientId)
-                                  .update({'last_updated': FieldValue.serverTimestamp()});
-                            }
-
-                            print('✅ Admin booking completed - Booked sessions incremented immediately');
-
                             if (mounted) {
                               Navigator.pop(context);
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text("Bookings updated successfully"), backgroundColor: Colors.green),
+                                const SnackBar(
+                                  content: Text("Bookings updated successfully"),
+                                  backgroundColor: Colors.green,
+                                ),
                               );
+                              
+                              // Refresh the slots data to update UI immediately
+                              _listenToDay(_selectedDay);
                             }
                           } catch (e) {
                             if (!mounted) return;
@@ -664,6 +873,15 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
         },
       ),
     );
+  }
+
+  bool _isPastSlot(String slotTime, DateTime slotDate) {
+    try {
+      final slotDateTime = _parseSlotDateTime(slotTime, slotDate);
+      return slotDateTime.isBefore(DateTime.now());
+    } catch (e) {
+      return false;
+    }
   }
 
   // ✅ FIXED: Enhanced method to increment booked sessions (matches client-side logic)
@@ -704,7 +922,6 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
     }
   }
 
-  // ✅ FIXED: Enhanced method to decrement booked sessions
   Future<void> _decrementBookedSessions(String purchaseId) async {
     try {
       final purchaseRef = FirebaseFirestore.instance
@@ -713,32 +930,36 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
 
       await FirebaseFirestore.instance.runTransaction((txn) async {
         final snap = await txn.get(purchaseRef);
-        if (!snap.exists) return;
+        if (!snap.exists) {
+          print('❌ Purchase document not found: $purchaseId');
+          return;
+        }
 
         final data = snap.data()!;
         final totalSessions = data['totalSessions'] as int? ?? 0;
         final currentBooked = (data['bookedSessions'] as num?)?.toInt() ?? 0;
         
         if (currentBooked > 0) {
-          final newBookedCount = currentBooked - 1;
+          final newBookedCount = currentBooked - 1; // ✅ ACTUALLY DECREMENT
           final newAvailableSessions = totalSessions - newBookedCount;
 
-          // ✅ FIX: Update ONLY booked and available sessions
+          // ✅ FIX: Update booked and available sessions
           txn.update(purchaseRef, {
             'bookedSessions': newBookedCount,
             'availableSessions': newAvailableSessions,
-            // ⚠️ DON'T update usedSessions or remainingSessions here
             'updatedAt': FieldValue.serverTimestamp(),
           });
+          
+          print('✅ Admin decremented purchase $purchaseId: Booked: $newBookedCount, Available: $newAvailableSessions');
+        } else {
+          print('ℹ️ No booked sessions to decrement for purchase: $purchaseId');
         }
       });
     } catch (e) {
       print('❌ Error decrementing purchase sessions: $e');
+      rethrow; // Important: rethrow to handle in calling method
     }
   }
-
-  // Rest of your existing methods (_cancelBookingDialog, build, etc.) remain the same...
-  // ... [Keep all your existing UI code and other methods unchanged]
   void _cancelBookingDialog(String docId, Map<String, dynamic> slotData) {
     final bookedNames = List<String>.from(slotData['booked_names'] ?? []);
     final bookedUids = List<String>.from(slotData['booked_by'] ?? []);
@@ -814,6 +1035,8 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
                         .collection('trainer_slots')
                         .doc(docId);
 
+                    // In the _cancelBookingDialog method, fix the transaction part:
+
                     await FirebaseFirestore.instance.runTransaction((txn) async {
                       final snap = await txn.get(slotRef);
                       if (!snap.exists) throw Exception("Slot not found");
@@ -829,19 +1052,68 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
                       // Safe removal using indices
                       for (var i = bookedBy.length - 1; i >= 0; i--) {
                         if (selectedClientIds.contains(bookedBy[i])) {
+                          final clientId = bookedBy[i];
+                          final purchaseId = userPurchaseMap[clientId];
+                          
+                          // Remove from arrays
                           if (i < bookedNames.length) bookedNames.removeAt(i);
                           if (i < bookedEmails.length) bookedEmails.removeAt(i);
-                          if (i < purchaseIds.length) {
-                            final purchaseId = purchaseIds[i];
-                            purchaseIds.removeAt(i);
-                            // Decrement booked sessions for this purchase
-                            if (purchaseId != null) {
-                              _decrementBookedSessions(purchaseId);
+                          if (i < purchaseIds.length) purchaseIds.removeAt(i);
+                          
+                          userPurchaseMap.remove(clientId);
+                          statusByUser[clientId] = 'Cancelled';
+                          bookedBy.removeAt(i);
+                          
+                          // ✅ FIXED: Decrement booked sessions with proper error handling
+                          // In the cancellation transaction, fix the slotTime reference
+                          if (purchaseId != null) {
+                            try {
+                              await _decrementBookedSessions(purchaseId.toString());
+                              
+                              // ✅ FIXED: Get slotTime from the document ID or slot data
+                              final slotTime = docId.split('|')[1]; // Extract time from docId format: "dateKey|time"
+                              final slotDate = (data['date'] as Timestamp).toDate();
+                              
+                              // ✅ ADDED: If it's a past session, also adjust used sessions
+                              final purchaseDoc = await FirebaseFirestore.instance
+                                  .collection('client_purchases')
+                                  .doc(purchaseId)
+                                  .get();
+                                  
+                              if (purchaseDoc.exists) {
+                                final purchaseData = purchaseDoc.data()!;
+                                final currentUsed = (purchaseData['usedSessions'] as num?)?.toInt() ?? 0;
+                                final totalSessions = (purchaseData['totalSessions'] as num?)?.toInt() ?? 0;
+                                
+                                // Check if this was a past completed session
+                                DateTime slotEndTime;
+                                try {
+                                  slotEndTime = _parseSlotEndTime(slotTime, slotDate);
+                                } catch (e) {
+                                  // Fallback: if parsing fails, assume 1-hour session
+                                  slotEndTime = slotDate.add(Duration(hours: 1));
+                                }
+                                
+                                if (slotEndTime.isBefore(DateTime.now())) {
+                                  // It's a past session - decrement used sessions too
+                                  final newUsedSessions = currentUsed > 0 ? currentUsed - 1 : 0;
+                                  final newRemainingSessions = totalSessions - newUsedSessions;
+                                  
+                                  await purchaseDoc.reference.update({
+                                    'usedSessions': newUsedSessions,
+                                    'remainingSessions': newRemainingSessions,
+                                    'updatedAt': FieldValue.serverTimestamp(),
+                                  });
+                                  
+                                  print('✅ Adjusted used sessions for past session cancellation: $clientId');
+                                }
+                              }
+                              
+                              print('✅ Successfully decremented sessions for client: $clientId');
+                            } catch (e) {
+                              print('❌ Failed to decrement sessions for client $clientId: $e');
                             }
                           }
-                          userPurchaseMap.remove(bookedBy[i]);
-                          statusByUser[bookedBy[i]] = 'Cancelled';
-                          bookedBy.removeAt(i);
                         }
                       }
 
@@ -1011,20 +1283,26 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
                                 children: [
                                   Text(time, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                                   const SizedBox(height: 4),
+                                  // Replace the availability indicator part with:
                                   Row(
                                     children: [
                                       Container(
                                         width: 10,
                                         height: 10,
                                         decoration: BoxDecoration(
-                                          color: isFull ? Colors.red : Colors.green,
+                                          color: _isPastSlot(slotLabels[index], _selectedDay) ? Colors.orange : 
+                                                isFull ? Colors.red : Colors.green,
                                           shape: BoxShape.circle,
                                         ),
                                       ),
                                       const SizedBox(width: 6),
                                       Text(
+                                        _isPastSlot(slotLabels[index], _selectedDay) ? "Unavailable" : 
                                         isFull ? "Fully Booked" : "Available",
-                                        style: TextStyle(color: isFull ? Colors.red : Colors.green),
+                                        style: TextStyle(
+                                          color: _isPastSlot(slotLabels[index], _selectedDay) ? Colors.orange : 
+                                                isFull ? Colors.red : Colors.green,
+                                        ),
                                       ),
                                       const Spacer(),
                                       Text(
@@ -1054,14 +1332,26 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
                                 tooltip: "Cancel bookings",
                               ),
                             ElevatedButton(
-                              onPressed: isFull ? null : () => _bookForClientDialog(docId),
+                              onPressed: () {
+                                final isPastSlot = _isPastSlot(slotLabels[index], _selectedDay);
+                                if (isPastSlot) {
+                                  _showPastSlotViewDialog(docId);
+                                } else if (!isFull) {
+                                  _bookForClientDialog(docId);
+                                }
+                              },
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: isFull ? Colors.grey[300] : const Color(0xFF1C2D5E),
-                                foregroundColor: isFull ? Colors.grey : Colors.white,
+                                backgroundColor: _isPastSlot(slotLabels[index], _selectedDay) ? Colors.orange : 
+                                              isFull ? Colors.grey[300] : const Color(0xFF1C2D5E),
+                                foregroundColor: _isPastSlot(slotLabels[index], _selectedDay) ? Colors.white :
+                                              isFull ? Colors.grey : Colors.white,
                                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                               ),
-                              child: Text(isFull ? "FULL" : "BOOK"),
+                              child: Text(
+                                _isPastSlot(slotLabels[index], _selectedDay) ? "VIEW" :
+                                isFull ? "FULL" : "BOOK"
+                              ),
                             ),
                           ],
                         ),
