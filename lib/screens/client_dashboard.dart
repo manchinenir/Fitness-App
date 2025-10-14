@@ -68,6 +68,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
         _setupSessionsListener();
         _setupProfileImageListener();
         _loadTabDisabledStatus();
+        _setupRealTimeSessionListener();
       }
     });
 
@@ -75,6 +76,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
     _setupSessionsListener();
     _setupProfileImageListener();
     _loadTabDisabledStatus();
+    _setupRealTimeSessionListener();
 
     FirebaseMessaging.onMessage.listen((message) {
       if (message.notification != null && mounted) {
@@ -122,6 +124,21 @@ class _ClientDashboardState extends State<ClientDashboard> {
     }
   }
 
+  void _setupRealTimeSessionListener() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    FirebaseFirestore.instance
+        .collection('trainer_slots')
+        .where('booked_by', arrayContains: uid)
+        .snapshots()
+        .listen((_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+  }
+
   void _setupProfileImageListener() {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
@@ -149,6 +166,15 @@ class _ClientDashboardState extends State<ClientDashboard> {
         }
       });
     }
+  }
+
+  /// NEW: Month Day, Year formatting (e.g., October 13, 2025)
+  String _formatMonthDayYear(DateTime dt) {
+    const months = [
+      'January','February','March','April','May','June',
+      'July','August','September','October','November','December'
+    ];
+    return '${months[dt.month - 1]} ${dt.day}, ${dt.year}';
   }
 
   void _setupSessionsListener() {
@@ -182,8 +208,9 @@ class _ClientDashboardState extends State<ClientDashboard> {
             (a['date'] as DateTime).compareTo(b['date'] as DateTime));
         final next = upcoming.first;
         final dt = next['date'] as DateTime;
-        final dateStr =
-            '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
+
+        // Use Month Day, Year format
+        final dateStr = _formatMonthDayYear(dt);
         nextInfo = '$dateStr – ${next['time']}';
       }
       if (mounted) {
@@ -194,19 +221,27 @@ class _ClientDashboardState extends State<ClientDashboard> {
       }
     });
 
-    // Add listener for purchase changes to update active plans count
     FirebaseFirestore.instance
         .collection('client_purchases')
         .where('userId', isEqualTo: uid)
         .snapshots()
         .listen((_) {
       if (mounted) {
-        setState(() {
-          // This will trigger a rebuild of the active plans count StreamBuilder
-        });
+        setState(() {});
+      }
+    });
+
+    FirebaseFirestore.instance
+        .collection('client_subscriptions')
+        .where('userId', isEqualTo: uid)
+        .snapshots()
+        .listen((_) {
+      if (mounted) {
+        setState(() {});
       }
     });
   }
+
   Future<void> _fetchUserProfile() async {
     setState(() {
       isLoading = true;
@@ -277,7 +312,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to upload image')),
+          const SnackBar(content: Text('Failed to upload image')),
         );
       }
     }
@@ -493,7 +528,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
                                   );
                                 }
 
-                                int activeCount = 0;
+                                int purchaseCount = 0;
                                 
                                 for (final doc in snap.data!.docs) {
                                   final data = doc.data() as Map<String, dynamic>;
@@ -501,34 +536,107 @@ class _ClientDashboardState extends State<ClientDashboard> {
                                   final remainingSessions = data['remainingSessions'] as int? ?? 0;
                                   final status = (data['status'] as String? ?? 'active').toLowerCase();
                                   
-                                  // Count only active plans with remaining sessions that are not cancelled
                                   if (isActive && remainingSessions > 0 && status != 'cancelled') {
-                                    activeCount++;
+                                    purchaseCount++;
                                   }
                                 }
-                                
-                                return Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      '$activeCount',
-                                      style: const TextStyle(
-                                        fontSize: 34,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    const Text(
-                                      'ACTIVE PLANS',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                        letterSpacing: 0.5,
-                                      ),
-                                    ),
-                                  ],
+
+                                return StreamBuilder<QuerySnapshot>(
+                                  stream: FirebaseFirestore.instance
+                                      .collection('client_subscriptions')
+                                      .where('userId', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
+                                      .snapshots(),
+                                  builder: (context, subSnap) {
+                                    if (subSnap.hasError) {
+                                      return Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            '$purchaseCount',
+                                            style: const TextStyle(
+                                              fontSize: 34,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          const Text(
+                                            'ACTIVE PLANS',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.bold,
+                                              letterSpacing: 0.5,
+                                            ),
+                                          ),
+                                        ],
+                                      );
+                                    }
+                                    
+                                    if (!subSnap.hasData) {
+                                      return Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            '$purchaseCount',
+                                            style: const TextStyle(
+                                              fontSize: 34,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          const Text(
+                                            'ACTIVE PLANS',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.bold,
+                                              letterSpacing: 0.5,
+                                            ),
+                                          ),
+                                        ],
+                                      );
+                                    }
+
+                                    int subCount = 0;
+                                    
+                                    for (final doc in subSnap.data!.docs) {
+                                      final data = doc.data() as Map<String, dynamic>;
+                                      final isActive = data['isActive'] as bool? ?? false;
+                                      final status = (data['status'] as String? ?? 'active').toLowerCase();
+                                      
+                                      if (isActive && status != 'cancelled') {
+                                        subCount++;
+                                      }
+                                    }
+                                    
+                                    final totalCount = purchaseCount + subCount;
+                                    
+                                    return Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          '$totalCount',
+                                          style: const TextStyle(
+                                            fontSize: 34,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        const Text(
+                                          'ACTIVE PLANS',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.bold,
+                                            letterSpacing: 0.5,
+                                          ),
+                                        ),
+                                      ],
+                                    );
+                                  },
                                 );
                               },
                             ),

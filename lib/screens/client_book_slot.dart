@@ -89,6 +89,42 @@ class _ClientBookSlotState extends State<ClientBookSlot> {
       _fixInconsistentSessionData(); // Add this line
     });
   }
+  Future<void> _fixInconsistentSessionData() async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
+
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('client_purchases')
+          .where('userId', isEqualTo: currentUser.uid)
+          .get();
+
+      print('🛠️ Fixing inconsistent session data...');
+
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        final totalSessions = (data['totalSessions'] as num?)?.toInt() ?? 0;
+        final bookedSessions = (data['bookedSessions'] as num?)?.toInt() ?? 0;
+        
+        // Calculate correct available sessions
+        final correctAvailableSessions = totalSessions - bookedSessions;
+        final currentAvailableSessions = (data['availableSessions'] as num?)?.toInt() ?? 0;
+        
+        // Only update if there's a discrepancy
+        if (currentAvailableSessions != correctAvailableSessions) {
+          await doc.reference.update({
+            'availableSessions': correctAvailableSessions,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+          print('✅ Fixed ${data['planName']}: available=$correctAvailableSessions (was $currentAvailableSessions)');
+        }
+      }
+      
+      print('✅ Session data consistency check completed');
+    } catch (e) {
+      print('❌ Error in _fixInconsistentSessionData: $e');
+    }
+  }
   // Load the eligible purchase for booking with better error handling
   Future<void> _loadEligiblePurchase() async {
     try {
@@ -262,8 +298,7 @@ class _ClientBookSlotState extends State<ClientBookSlot> {
     print('=== 🎯 END DEBUG ===');
   }
 
-  // Get the oldest active purchase with remaining sessions (FIFO)
-  // Get the oldest active purchase with remaining sessions (FIFO)
+  // ✅ FIXED: Change to FIFO (oldest purchase first)
   Future<Map<String, dynamic>?> _getEligiblePurchase() async {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return null;
@@ -279,19 +314,19 @@ class _ClientBookSlotState extends State<ClientBookSlot> {
       for (final doc in snapshot.docs) {
         final data = doc.data();
         final isActive = data['isActive'] as bool? ?? false;
-        final remainingSessions = data['remainingSessions'] as int? ?? 0;
         final bookedSessions = data['bookedSessions'] as int? ?? 0;
         final status = (data['status'] as String? ?? 'active').toLowerCase();
         
-        // ✅ CRITICAL FIX: Calculate available sessions CORRECTLY
+        // ✅ FIXED: Simplified session calculation
         final totalSessions = data['totalSessions'] as int? ?? 0;
         final availableSessions = totalSessions - bookedSessions;
+        
         // Plan is eligible if it's active, not cancelled, and has available sessions
         final isEligible = isActive && 
                           status != 'cancelled' && 
                           status != 'completed' &&
                           status != 'expired' &&
-                          availableSessions > 0; // Use availableSessions, not remainingSessions
+                          availableSessions > 0;
                 
         if (isEligible) {
           String purchaseId;
@@ -305,28 +340,42 @@ class _ClientBookSlotState extends State<ClientBookSlot> {
             ...data,
             'purchaseId': purchaseId,
             'docId': doc.id,
-            'availableSessions': availableSessions, // Store the calculated value
+            'availableSessions': availableSessions,
           });
         }
       }
 
       if (eligiblePurchases.isEmpty) return null;
 
-      // Use LIFO (newest purchase first)
+      // ✅ CONSISTENT FIFO: Use oldest purchase first
       eligiblePurchases.sort((a, b) {
         final dateA = (a['purchaseDate'] as Timestamp?)?.toDate() ?? DateTime.now();
         final dateB = (b['purchaseDate'] as Timestamp?)?.toDate() ?? DateTime.now();
-        return dateB.compareTo(dateA); // Newest first
+        return dateA.compareTo(dateB); // Oldest first - FIFO
       });
 
-      final selectedPurchase = eligiblePurchases.first;
-
-      print('🎯 ELIGIBLE PURCHASES SORTED (NEWEST FIRST):');
+      // ✅ CRITICAL FIX: Find the first plan with available sessions
+      Map<String, dynamic>? selectedPurchase;
       for (var purchase in eligiblePurchases) {
-        print('   📋 ${purchase['planName']} - ${purchase['availableSessions']} available (${purchase['remainingSessions']} remaining - ${purchase['bookedSessions']} booked)');
+        final availableSessions = purchase['availableSessions'] as int;
+        if (availableSessions > 0) {
+          selectedPurchase = purchase;
+          break;
+        }
       }
 
-      return eligiblePurchases.first;
+      if (selectedPurchase == null) return null;
+
+      print('🎯 ELIGIBLE PURCHASES SORTED (FIFO - OLDEST FIRST):');
+      for (var purchase in eligiblePurchases) {
+        final available = purchase['availableSessions'] as int;
+        final booked = purchase['bookedSessions'] as int;
+        final total = purchase['totalSessions'] as int;
+        print('   📋 ${purchase['planName']} - $available available, $booked booked, $total total (Purchased: ${purchase['purchaseDate']})');
+      }
+      print('   🎯 SELECTED: ${selectedPurchase['planName']}');
+
+      return selectedPurchase;
     } catch (e) {
       debugPrint('❌ Error getting eligible purchase:');
       return null;
@@ -359,7 +408,143 @@ class _ClientBookSlotState extends State<ClientBookSlot> {
       print('❌ Debug error');
     }
   }
+  Future<void> _bookSlot(String time, DateTime selectedDate) async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
 
+    setState(() => _isLoading = true);
+
+    try {
+      final eligibilityResult = await _checkUserEligibility();
+      
+      if (!eligibilityResult['eligible']) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(eligibilityResult['message'])),
+        );
+        return;
+      }
+
+      final purchaseId = eligibilityResult['purchaseId'] as String;
+      final purchaseData = eligibilityResult['purchaseData'] as Map<String, dynamic>;
+      final availableSessions = purchaseData['availableSessions'] as int;
+
+      if (availableSessions <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No available sessions in current plan')),
+        );
+        return;
+      }
+
+      final dateKey = DateFormat('yyyy-MM-dd').format(selectedDate);
+      final docId = "$dateKey|$time";
+
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        // Get slot document
+        final slotRef = FirebaseFirestore.instance.collection('trainer_slots').doc(docId);
+        final slotDoc = await transaction.get(slotRef);
+
+        // Get user document for name/email
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(currentUser.uid)
+            .get();
+        
+        final userName = userDoc['name'] ?? 'Client';
+        final userEmail = userDoc['email'] ?? '';
+
+        List bookedBy = [];
+        List bookedNames = [];
+        List bookedEmails = [];
+        List purchaseIds = [];
+        Map<String, dynamic> userPurchaseMap = {};
+
+        if (slotDoc.exists) {
+          bookedBy = List.from(slotDoc['booked_by'] ?? []);
+          bookedNames = List.from(slotDoc['booked_names'] ?? []);
+          bookedEmails = List.from(slotDoc['booked_emails'] ?? []);
+          purchaseIds = List.from(slotDoc['purchase_ids'] ?? []);
+          userPurchaseMap = Map<String, dynamic>.from(slotDoc['user_purchase_map'] ?? {});
+        }
+
+        // Check if slot is full
+        if (bookedBy.length >= slotCapacity) {
+          throw Exception('Slot is already full');
+        }
+
+        // Check if user already booked this slot
+        if (bookedBy.contains(currentUser.uid)) {
+          throw Exception('You have already booked this slot');
+        }
+
+        // Add user to slot
+        bookedBy.add(currentUser.uid);
+        bookedNames.add(userName);
+        bookedEmails.add(userEmail);
+        purchaseIds.add(purchaseId);
+        userPurchaseMap[currentUser.uid] = purchaseId;
+
+        // Update slot
+        transaction.set(slotRef, {
+          'date': Timestamp.fromDate(selectedDate),
+          'time': time,
+          'trainer_name': trainerName,
+          'booked': bookedBy.length,
+          'booked_by': bookedBy,
+          'booked_names': bookedNames,
+          'booked_emails': bookedEmails,
+          'purchase_ids': purchaseIds,
+          'user_purchase_map': userPurchaseMap,
+          'capacity': slotCapacity,
+          'last_updated': FieldValue.serverTimestamp(),
+          'status_by_user': {
+            currentUser.uid: 'Booked'
+          },
+        }, SetOptions(merge: true));
+
+        // ✅ CRITICAL FIX: Update purchase - increment booked sessions
+        final purchaseRef = FirebaseFirestore.instance.collection('client_purchases').doc(purchaseId);
+        final purchaseDoc = await transaction.get(purchaseRef);
+        
+        if (purchaseDoc.exists) {
+          final currentBooked = (purchaseDoc['bookedSessions'] as num?)?.toInt() ?? 0;
+          final totalSessions = (purchaseDoc['totalSessions'] as num?)?.toInt() ?? 0;
+          
+          if (currentBooked >= totalSessions) {
+            throw Exception('No sessions available in this plan');
+          }
+
+          transaction.update(purchaseRef, {
+            'bookedSessions': currentBooked + 1,
+            'availableSessions': totalSessions - (currentBooked + 1),
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+
+          print('✅ Booking successful: Plan ${purchaseData['planName']} - Booked: ${currentBooked + 1}/$totalSessions');
+        }
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Booking confirmed for $time'),
+          backgroundColor: Colors.green,
+        ),
+      );
+
+      // ✅ CRITICAL FIX: Force refresh to update plan selection
+      await _forceRefreshPurchaseData();
+
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Booking failed: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      debugPrint('Booking error: ${e.toString()}');
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
   // Add this method to fix existing purchase documents
   Future<void> _fixExistingPurchaseIds() async {
     final currentUser = FirebaseAuth.instance.currentUser;
@@ -413,20 +598,19 @@ class _ClientBookSlotState extends State<ClientBookSlot> {
       for (final doc in snapshot.docs) {
         final data = doc.data();
         final isActive = data['isActive'] as bool? ?? false;
-        final remainingSessions = data['remainingSessions'] as int? ?? 0;
         final bookedSessions = data['bookedSessions'] as int? ?? 0;
         final status = (data['status'] as String? ?? 'active').toLowerCase();
         
-        // ✅ FIX: Calculate available sessions correctly
+        // ✅ FIXED: Simplified session calculation
         final totalSessions = data['totalSessions'] as int? ?? 0;
         final availableSessions = totalSessions - bookedSessions;
 
-        // ✅ FIX: Use availableSessions for eligibility check
+        // ✅ FIXED: Use availableSessions for eligibility check
         final isEligible = isActive && 
                           status != 'cancelled' && 
                           status != 'completed' &&
                           status != 'expired' &&
-                          availableSessions > 0; // Use available sessions, not remaining
+                          availableSessions > 0;
 
         if (isEligible) {
           String purchaseId;
@@ -440,7 +624,7 @@ class _ClientBookSlotState extends State<ClientBookSlot> {
             ...data,
             'purchaseId': purchaseId,
             'docId': doc.id,
-            'availableSessions': availableSessions, // Store the calculated value
+            'availableSessions': availableSessions,
           });
 
           totalAvailableSessions += availableSessions;
@@ -456,7 +640,6 @@ class _ClientBookSlotState extends State<ClientBookSlot> {
       }
 
       print('📈 TOTAL: User has $totalAvailableSessions available session(s) across ${eligiblePurchases.length} active plans');
-      print('📋 INACTIVE: User has ${inactivePurchases.length} inactive/cancelled plans');
 
       if (eligiblePurchases.isEmpty) {
         return {
@@ -469,14 +652,32 @@ class _ClientBookSlotState extends State<ClientBookSlot> {
         };
       }
 
-      // Use LIFO (newest purchase first) for better user experience
+      // ✅ CONSISTENT FIFO: Use oldest purchase first
       eligiblePurchases.sort((a, b) {
         final dateA = (a['purchaseDate'] as Timestamp?)?.toDate() ?? DateTime.now();
         final dateB = (b['purchaseDate'] as Timestamp?)?.toDate() ?? DateTime.now();
-        return dateB.compareTo(dateA); // Newest first
+        return dateA.compareTo(dateB); // Oldest first - FIFO
       });
 
-      final selectedPurchase = eligiblePurchases.first;
+      // ✅ CRITICAL FIX: Find the first plan with available sessions
+      Map<String, dynamic>? selectedPurchase;
+      for (var purchase in eligiblePurchases) {
+        final availableSessions = purchase['availableSessions'] as int;
+        if (availableSessions > 0) {
+          selectedPurchase = purchase;
+          break;
+        }
+      }
+
+      if (selectedPurchase == null) {
+        return {
+          'eligible': false,
+          'message': 'All sessions in your active plans are currently booked.',
+          'canCancelOnly': true,
+          'inactivePurchases': inactivePurchases,
+        };
+      }
+
       final purchaseId = selectedPurchase['purchaseId'] as String;
       final availableSessions = selectedPurchase['availableSessions'] as int;
 
@@ -579,14 +780,6 @@ class _ClientBookSlotState extends State<ClientBookSlot> {
         List purchaseIds = List.from(doc['purchase_ids'] ?? []);
         Map<String, dynamic> userPurchaseMap = Map<String, dynamic>.from(doc['user_purchase_map'] ?? {});
 
-        final userDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(currentUser.uid)
-            .get();
-            
-        final userEmail = userDoc['email'] ?? '';
-        final userName = userDoc['name'] ?? 'Client';
-
         final userIndex = bookedBy.indexOf(currentUser.uid);
         if (userIndex == -1) {
           if (!suppressError) throw Exception('No booking found for current user');
@@ -609,14 +802,13 @@ class _ClientBookSlotState extends State<ClientBookSlot> {
           'purchase_ids': purchaseIds,
           'user_purchase_map': userPurchaseMap,
           'last_updated': FieldValue.serverTimestamp(),
-          // Update status to show cancelled
           'status_by_user': {
             currentUser.uid: 'Cancelled'
           },
         });
       });
 
-      // ✅ CRITICAL FIX: Update purchase data to make session available again
+      // ✅ CRITICAL FIX: Return session to the correct purchase
       if (purchaseId != null) {
         await _returnSessionToPurchase(purchaseId);
       }
@@ -627,7 +819,7 @@ class _ClientBookSlotState extends State<ClientBookSlot> {
       if (!suppressError) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Booking cancelled successfully.'),
+            content: Text('Booking cancelled successfully. Session returned to your plan.'),
             backgroundColor: Colors.green,
           ),
         );
@@ -643,11 +835,12 @@ class _ClientBookSlotState extends State<ClientBookSlot> {
           ),
         );
       }
-      if (!suppressError) debugPrint('Cancellation error');
+      if (!suppressError) debugPrint('Cancellation error: ${e.toString()}');
     } finally {
       if (!suppressError) setState(() => _isLoading = false);
     }
   }
+
 
   // Add this method to return session to purchase
   Future<void> _returnSessionToPurchase(String purchaseId) async {
@@ -671,48 +864,18 @@ class _ClientBookSlotState extends State<ClientBookSlot> {
           
           await purchaseDoc.reference.update({
             'bookedSessions': newBookedCount,
-            'availableSessions': newAvailableSessions, // Recalculated value
+            'availableSessions': newAvailableSessions,
             'updatedAt': FieldValue.serverTimestamp(),
           });
-          print('🔄 Updated purchase on cancellation: Booked: $newBookedCount, Available: $newAvailableSessions, Total: $totalSessions');
+          
+          print('🔄 Session returned to purchase: ${data['planName']}');
+          print('   Booked: $newBookedCount, Available: $newAvailableSessions, Total: $totalSessions');
         } else {
           print('ℹ️ Session not returned - Plan inactive/cancelled or no booked sessions');
         }
       }
     } catch (e) {
-      print('⚠️ Could not update purchase sessions, but booking was cancelled');
-    }
-  }
-  Future<void> _fixInconsistentSessionData() async {
-    final currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null) return;
-
-    try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection('client_purchases')
-          .where('userId', isEqualTo: currentUser.uid)
-          .get();
-
-      for (final doc in snapshot.docs) {
-        final data = doc.data();
-        final totalSessions = (data['totalSessions'] as num?)?.toInt() ?? 0;
-        final bookedSessions = (data['bookedSessions'] as num?)?.toInt() ?? 0;
-        final currentAvailable = (data['availableSessions'] as num?)?.toInt() ?? 0;
-        
-        // Calculate what available sessions should be
-        final calculatedAvailable = totalSessions - bookedSessions;
-        
-        // If there's a discrepancy, fix it
-        if (currentAvailable != calculatedAvailable) {
-          await doc.reference.update({
-            'availableSessions': calculatedAvailable,
-            'updatedAt': FieldValue.serverTimestamp(),
-          });
-          print('✅ Fixed inconsistent session data for ${data['planName']}: available=$calculatedAvailable (was $currentAvailable)');
-        }
-      }
-    } catch (e) {
-      print('❌ Error fixing inconsistent session data');
+      print('⚠️ Could not update purchase sessions, but booking was cancelled: ${e.toString()}');
     }
   }
 

@@ -1,15 +1,18 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
+import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/services.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'square_checkout.dart';
-import 'invoice_review_page.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_pdfview/flutter_pdfview.dart';
-import 'dart:io';
-import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import 'invoice_review_page.dart';
+import 'square_checkout.dart';
 
 class PDFWorkoutsTab extends StatefulWidget {
   const PDFWorkoutsTab({super.key});
@@ -22,12 +25,15 @@ class _PDFWorkoutsTabState extends State<PDFWorkoutsTab> {
   final _auth = FirebaseAuth.instance;
   final _firestore = FirebaseFirestore.instance;
   final _storage = FirebaseStorage.instance;
+
   bool _isLoading = true;
   List<Map<String, dynamic>> _pdfWorkouts = [];
   bool _hasActiveSubscription = false;
   DateTime? _subscriptionEndDate;
   bool _isCheckingSubscription = true;
   bool _isProcessingPayment = false;
+
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _pdfWorkoutsSubscription;
 
   // Square payment configuration (same as plans screen)
   static const String _squareApplicationId = 'sandbox-sq0idb-b_5NuSv1kYCZWkITbVqS4w';
@@ -37,108 +43,22 @@ class _PDFWorkoutsTabState extends State<PDFWorkoutsTab> {
   void initState() {
     super.initState();
     _checkSubscriptionStatus();
-    _loadPDFWorkouts();
+    _setupPDFWorkoutsListener();
   }
 
-  DateTime _getCurrentLocalTime() {
-    return DateTime.now().toLocal();
+  @override
+  void dispose() {
+    _pdfWorkoutsSubscription?.cancel();
+    super.dispose();
   }
 
-  DateTime _addDaysToLocalTime(DateTime startDate, int days) {
-    return startDate.add(Duration(days: days));
-  }
+  // ---------- Time helpers (store local time strings for clarity) ----------
+  DateTime _getCurrentLocalTime() => DateTime.now().toLocal();
+  DateTime _addDaysToLocalTime(DateTime startDate, int days) => startDate.add(Duration(days: days));
+  String _convertToLocalTimeString(DateTime dateTime) => dateTime.toIso8601String();
+  DateTime _convertStringToLocalDateTime(String dateString) => DateTime.parse(dateString).toLocal();
 
-  // Convert DateTime to Firestore format while preserving local time as ISO string
-  String _convertToLocalTimeString(DateTime dateTime) {
-    return dateTime.toIso8601String(); // This preserves the local time
-  }
-
-  // Helper method to convert stored string back to local DateTime
-  DateTime _convertStringToLocalDateTime(String dateString) {
-    return DateTime.parse(dateString).toLocal();
-  }
-
-  Future<void> _checkSubscriptionStatus() async {
-    try {
-      final userId = _auth.currentUser?.uid;
-      if (userId == null) return;
-
-      final subscriptionSnapshot = await _firestore
-          .collection('client_subscriptions')
-          .where('userId', isEqualTo: userId)
-          .where('isActive', isEqualTo: true)
-          .get();
-
-      if (subscriptionSnapshot.docs.isNotEmpty) {
-        final subscription = subscriptionSnapshot.docs.first.data();
-        
-        // Handle both string and timestamp formats for backward compatibility
-        DateTime endDate;
-        if (subscription['endDate'] is String) {
-          // New format: stored as local time string
-          endDate = _convertStringToLocalDateTime(subscription['endDate'] as String);
-        } else if (subscription['endDate'] is Timestamp) {
-          // Old format: timestamp (UTC) - convert to local
-          endDate = (subscription['endDate'] as Timestamp).toDate().toLocal();
-        } else {
-          throw Exception('Invalid endDate format');
-        }
-        
-        // Get current local time for comparison
-        final currentLocalTime = _getCurrentLocalTime();
-        
-        setState(() {
-          _hasActiveSubscription = currentLocalTime.isBefore(endDate);
-          _subscriptionEndDate = endDate;
-        });
-        
-        print('Subscription check:');
-        print('Current local time: $currentLocalTime');
-        print('Subscription end date: $endDate');
-        print('Is active: ${currentLocalTime.isBefore(endDate)}');
-      } else {
-        setState(() {
-          _hasActiveSubscription = false;
-          _subscriptionEndDate = null;
-        });
-      }
-    } catch (e) {
-      print('Error checking subscription: $e');
-      setState(() {
-        _hasActiveSubscription = false;
-        _subscriptionEndDate = null;
-      });
-    } finally {
-      setState(() {
-        _isCheckingSubscription = false;
-      });
-    }
-  }
-
-  Future<void> _loadPDFWorkouts() async {
-    try {
-      final snapshot = await _firestore
-          .collection('pdf_workouts')
-          .orderBy('createdAt', descending: true)
-          .get();
-
-      setState(() {
-        _pdfWorkouts = snapshot.docs.map((doc) {
-          final data = doc.data();
-          data['docId'] = doc.id;
-          return data;
-        }).toList();
-        _isLoading = false;
-      });
-    } catch (e) {
-      print('Error loading PDF workouts: $e');
-      setState(() {
-        _isLoading = false;
-      });
-    }
-  }
-
-  // ---------------- NEW: helper to fetch current user's name/email ----------------
+  // ---------- User profile (for subscription metadata) ----------
   Future<Map<String, String>> _getCurrentUserProfile() async {
     final uid = _auth.currentUser?.uid;
     if (uid == null) return {'name': '', 'email': ''};
@@ -153,8 +73,80 @@ class _PDFWorkoutsTabState extends State<PDFWorkoutsTab> {
       return {'name': '', 'email': _auth.currentUser?.email ?? ''};
     }
   }
-  // -------------------------------------------------------------------------------
 
+  // ---------- Subscription status ----------
+  Future<void> _checkSubscriptionStatus() async {
+    try {
+      final userId = _auth.currentUser?.uid;
+      if (userId == null) return;
+
+      final subscriptionSnapshot = await _firestore
+          .collection('client_subscriptions')
+          .where('userId', isEqualTo: userId)
+          .where('isActive', isEqualTo: true)
+          .get();
+
+      if (subscriptionSnapshot.docs.isNotEmpty) {
+        final subscription = subscriptionSnapshot.docs.first.data();
+
+        DateTime endDate;
+        if (subscription['endDate'] is String) {
+          endDate = _convertStringToLocalDateTime(subscription['endDate'] as String);
+        } else if (subscription['endDate'] is Timestamp) {
+          endDate = (subscription['endDate'] as Timestamp).toDate().toLocal();
+        } else {
+          throw Exception('Invalid endDate format');
+        }
+
+        final currentLocalTime = _getCurrentLocalTime();
+
+        setState(() {
+          _hasActiveSubscription = currentLocalTime.isBefore(endDate);
+          _subscriptionEndDate = endDate;
+        });
+      } else {
+        setState(() {
+          _hasActiveSubscription = false;
+          _subscriptionEndDate = null;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _hasActiveSubscription = false;
+        _subscriptionEndDate = null;
+      });
+    } finally {
+      setState(() {
+        _isCheckingSubscription = false;
+      });
+    }
+  }
+
+  // ---------- Realtime listener for pdf_workouts ----------
+  void _setupPDFWorkoutsListener() {
+    _pdfWorkoutsSubscription = _firestore
+        .collection('pdf_workouts')
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .listen((QuerySnapshot<Map<String, dynamic>> snapshot) {
+      if (!mounted) return;
+      setState(() {
+        _pdfWorkouts = snapshot.docs.map((doc) {
+          final data = doc.data();
+          data['docId'] = doc.id;
+          return data;
+        }).toList();
+        _isLoading = false;
+      });
+    }, onError: (error) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+      });
+    });
+  }
+
+  // ---------- Subscription flow ----------
   void _showSubscriptionRequiredDialog() {
     showDialog(
       context: context,
@@ -210,19 +202,18 @@ class _PDFWorkoutsTabState extends State<PDFWorkoutsTab> {
   }
 
   Future<void> _navigateToSubscriptionPayment() async {
-    // Create a subscription plan object similar to fitness plans
     final subscriptionPlan = {
       'docId': 'pdf_subscription_monthly',
       'name': 'PDF Workouts Monthly Subscription',
       'category': 'PDF Access',
-      'sessions': 1, // This represents 1 month access
-      'price': 29.99, // Monthly subscription price
+      'sessions': 1, // represents 1 month access
+      'price': 999.00, // monthly price (double)
       'description': 'Unlimited access to all PDF workouts for 30 days',
       'type': 'subscription'
     };
 
     setState(() => _isProcessingPayment = true);
-    
+
     final result = await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => SubscriptionPaymentPage(
@@ -246,36 +237,35 @@ class _PDFWorkoutsTabState extends State<PDFWorkoutsTab> {
       final userId = _auth.currentUser?.uid;
       if (userId == null) return;
 
-      // Use local time for subscription dates
       final now = _getCurrentLocalTime();
       final endDate = _addDaysToLocalTime(now, 30); // 30-day subscription
 
-      // NEW: get user name + email to store with the subscription
+      // fetch user profile for metadata
       final profile = await _getCurrentUserProfile();
       final userName = profile['name'] ?? '';
       final userEmail = profile['email'] ?? '';
 
-      // Write to client_subscriptions (mark clearly as a PDF subscription)
+      // write to client_subscriptions
       final subRef = await _firestore.collection('client_subscriptions').add({
         'userId': userId,
-        'userName': userName,               // <-- added
-        'userEmail': userEmail,             // <-- added
+        'userName': userName,
+        'userEmail': userEmail,
         'planName': 'PDF Workouts Monthly Subscription',
-        'price': 29.99,
-        'purchaseDate': _convertToLocalTimeString(now), // Save as local time string
-        'startDate': _convertToLocalTimeString(now),    // Save as local time string
-        'endDate': _convertToLocalTimeString(endDate),  // Save as local time string
+        'price': 999.00,
+        'purchaseDate': _convertToLocalTimeString(now),
+        'startDate': _convertToLocalTimeString(now),
+        'endDate': _convertToLocalTimeString(endDate),
         'isActive': true,
         'status': 'active',
         'paymentMethod': 'square',
         'paymentStatus': 'completed',
-        'timezone': 'Local/Device', // Track that we're using local time
-        'createdAt': FieldValue.serverTimestamp(), // Server timestamp for ordering
-        'type': 'pdf',               // <-- tag as PDF sub
-        'isPdf': true,               // <-- easy filter flag
+        'timezone': 'Local/Device',
+        'createdAt': FieldValue.serverTimestamp(),
+        'type': 'pdf',
+        'isPdf': true,
       });
 
-      // Also mirror into a helper collection for admin listing
+      // mirror to pdf_subscribers (for admin listing)
       await _firestore.collection('pdf_subscribers').doc(subRef.id).set({
         'userId': userId,
         'userName': userName,
@@ -288,7 +278,7 @@ class _PDFWorkoutsTabState extends State<PDFWorkoutsTab> {
       });
 
       await _checkSubscriptionStatus();
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -297,12 +287,7 @@ class _PDFWorkoutsTabState extends State<PDFWorkoutsTab> {
           ),
         );
       }
-      
-      print('Subscription created:');
-      print('Start date (local): $now');
-      print('End date (local): $endDate');
     } catch (e) {
-      print('Error completing subscription purchase: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -316,23 +301,23 @@ class _PDFWorkoutsTabState extends State<PDFWorkoutsTab> {
     }
   }
 
+  // ---------- Storage helper (optional) ----------
   Future<String> _getPDFDownloadUrl(String pdfPath) async {
     try {
       final ref = _storage.ref().child(pdfPath);
       return await ref.getDownloadURL();
     } catch (e) {
-      print('Error getting PDF download URL: $e');
       throw Exception('Could not load PDF: $e');
     }
   }
 
+  // ---------- Open viewer ----------
   void _showPDFViewer(Map<String, dynamic> pdfWorkout) {
     if (!_hasActiveSubscription) {
       _showSubscriptionRequiredDialog();
       return;
     }
 
-    // Check if PDF URL exists before opening viewer
     final pdfUrl = pdfWorkout['pdfUrl'];
     if (pdfUrl == null || pdfUrl.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -344,9 +329,9 @@ class _PDFWorkoutsTabState extends State<PDFWorkoutsTab> {
       return;
     }
 
-    // Prevent screenshots and recording
+    // Prevent screenshots/recording UI exposure (immersive mode)
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    
+
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => PDFViewerScreen(
@@ -357,6 +342,7 @@ class _PDFWorkoutsTabState extends State<PDFWorkoutsTab> {
     );
   }
 
+  // ---------- UI ----------
   Widget _buildPDFWorkoutCard(Map<String, dynamic> pdfWorkout, int index) {
     return Card(
       elevation: 3,
@@ -366,10 +352,7 @@ class _PDFWorkoutsTabState extends State<PDFWorkoutsTab> {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
           gradient: LinearGradient(
-            colors: [
-              Colors.grey[50]!,
-              Colors.white,
-            ],
+            colors: [Colors.grey[50]!, Colors.white],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
@@ -388,13 +371,13 @@ class _PDFWorkoutsTabState extends State<PDFWorkoutsTab> {
             ),
           ),
           title: Text(
-            pdfWorkout['name'],
+            pdfWorkout['name'] ?? 'Workout',
             style: TextStyle(
               fontWeight: FontWeight.bold,
               color: _hasActiveSubscription ? Colors.black : Colors.grey,
             ),
           ),
-          subtitle: pdfWorkout['description'] != null
+          subtitle: (pdfWorkout['description'] != null)
               ? Text(
                   pdfWorkout['description'],
                   style: TextStyle(
@@ -435,10 +418,7 @@ class _PDFWorkoutsTabState extends State<PDFWorkoutsTab> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [
-            Colors.orange[400]!,
-            Colors.orange[600]!,
-          ],
+          colors: [Colors.orange[400]!, Colors.orange[600]!],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -524,8 +504,6 @@ class _PDFWorkoutsTabState extends State<PDFWorkoutsTab> {
 
   String _formatDisplayDate(DateTime? date) {
     if (date == null) return 'N/A';
-    
-    // Format as "Month Day, Year" (e.g., "December 25, 2024")
     final month = _getMonthName(date.month);
     return '$month ${date.day}, ${date.year}';
   }
@@ -602,7 +580,8 @@ class _PDFWorkoutsTabState extends State<PDFWorkoutsTab> {
   }
 }
 
-// PDF Viewer Screen - SIMPLIFIED VERSION
+// ================= PDF Viewer =================
+
 class PDFViewerScreen extends StatefulWidget {
   final Map<String, dynamic> pdfWorkout;
   final DateTime? subscriptionEndDate;
@@ -612,14 +591,14 @@ class PDFViewerScreen extends StatefulWidget {
     required this.pdfWorkout,
     required this.subscriptionEndDate,
   });
- 
+
   @override
   State<PDFViewerScreen> createState() => _PDFViewerScreenState();
 }
 
 class _PDFViewerScreenState extends State<PDFViewerScreen> {
   bool _isLoading = true;
-  String? _pdfUrl;
+  String? _pdfPath; // local file path after download
   String? _errorMessage;
   PDFViewController? _pdfViewController;
   int _totalPages = 0;
@@ -629,7 +608,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   @override
   void initState() {
     super.initState();
-    _loadPDF();
+    _downloadPDFToLocalAndOpen();
   }
 
   @override
@@ -640,35 +619,33 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     super.dispose();
   }
 
-  Future<void> _loadPDF() async {
+  Future<void> _downloadPDFToLocalAndOpen() async {
     try {
       final pdfUrl = widget.pdfWorkout['pdfUrl'];
-
       if (pdfUrl == null || pdfUrl.isEmpty) {
         throw Exception('PDF URL not found or empty');
       }
-
       if (!pdfUrl.startsWith('http')) {
         throw Exception('Invalid PDF URL format');
       }
 
-      // Download PDF file to temporary directory
       final response = await http.get(Uri.parse(pdfUrl));
-      final bytes = response.bodyBytes;
+      if (response.statusCode != 200) {
+        throw Exception('Failed to fetch PDF (status ${response.statusCode})');
+      }
 
       final dir = await getTemporaryDirectory();
-      final file = File("${dir.path}/${widget.pdfWorkout['name']}.pdf");
-
-      await file.writeAsBytes(bytes, flush: true);
+      final safeName = (widget.pdfWorkout['name'] ?? 'workout').toString().replaceAll(RegExp(r'[^\w\-\.\ ]'), '_');
+      final file = File("${dir.path}/$safeName.pdf");
+      await file.writeAsBytes(response.bodyBytes, flush: true);
 
       setState(() {
-        _pdfUrl = file.path; // ✅ Use local file path here
+        _pdfPath = file.path; // Use local file path for crisp rendering
         _isLoading = false;
       });
     } catch (e) {
-      print('Error loading PDF: $e');
       setState(() {
-        _errorMessage = 'Failed to load PDF: ${e.toString()}';
+        _errorMessage = 'Failed to load PDF: $e';
         _isLoading = false;
       });
     }
@@ -714,7 +691,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
             ),
             const SizedBox(height: 16),
             ElevatedButton(
-              onPressed: _loadPDF,
+              onPressed: _downloadPDFToLocalAndOpen,
               child: const Text('Retry'),
             ),
           ],
@@ -722,19 +699,18 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       );
     }
 
-    if (_pdfUrl != null) {
+    if (_pdfPath != null) {
       return Stack(
         children: [
           PDFView(
-            filePath: _pdfUrl,
+            filePath: _pdfPath,
             autoSpacing: true,
             enableSwipe: true,
             pageSnap: true,
             swipeHorizontal: false,
             nightMode: false,
-            fitPolicy: FitPolicy.BOTH, // ✅ Fit PDF to screen
+            fitPolicy: FitPolicy.BOTH, // Fit page; avoids blur on scaling
             onError: (error) {
-              print('PDF Error: $error');
               setState(() {
                 _errorMessage = 'Error displaying PDF: $error';
               });
@@ -762,8 +738,6 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
               });
             },
           ),
-          
-          // Page number indicator at the bottom
           if (_pdfReady && _totalPages > 0)
             Positioned(
               bottom: 16,
@@ -774,7 +748,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF1C2D5E).withOpacity(0.8), // ✅ Changed to match UI color
+                    color: const Color(0xFF1C2D5E).withOpacity(0.8),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
@@ -792,9 +766,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       );
     }
 
-    return const Center(
-      child: Text('PDF not available'),
-    );
+    return const Center(child: Text('PDF not available'));
   }
 
   @override
@@ -802,7 +774,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          widget.pdfWorkout['name'],
+          widget.pdfWorkout['name'] ?? 'Workout',
           overflow: TextOverflow.ellipsis,
         ),
         backgroundColor: const Color(0xFF1C2D5E),
@@ -819,7 +791,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   }
 }
 
-// Subscription Payment Page (same as before)
+// ================= Subscription Payment Page =================
+
 class SubscriptionPaymentPage extends StatefulWidget {
   final Map<String, dynamic> plan;
   final String squareApplicationId;
