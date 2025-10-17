@@ -209,20 +209,15 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
               if (purchaseDoc.exists) {
                 final purchaseData = purchaseDoc.data()!;
                 final currentBooked = (purchaseData['bookedSessions'] as num?)?.toInt() ?? 0;
-                final currentUsed = (purchaseData['usedSessions'] as num?)?.toInt() ?? 0;
                 final totalSessions = (purchaseData['totalSessions'] as num?)?.toInt() ?? 0;
 
                 if (currentBooked > 0) {
-                  // ✅ CORRECTED: Decrement booked sessions and increment used sessions
+                  // ✅ CORRECTED: Decrement booked sessions and update available sessions
                   final newBookedSessions = currentBooked; // DECREMENT booked
-                  final newUsedSessions = currentUsed + 1; // INCREMENT used
-                  final newRemainingSessions = totalSessions - newUsedSessions;
                   final newAvailableSessions = totalSessions - newBookedSessions;
 
                   batch.update(purchaseDoc.reference, {
                     'bookedSessions': newBookedSessions,
-                    'usedSessions': newUsedSessions,
-                    'remainingSessions': newRemainingSessions,
                     'availableSessions': newAvailableSessions,
                     'updatedAt': FieldValue.serverTimestamp(),
                   });
@@ -233,8 +228,8 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
 
                   print(
                       '✅ Marked session completed for $clientId (purchase $purchaseId) - '
-                      'Booked: $newBookedSessions, Used: $newUsedSessions, '
-                      'Remaining: $newRemainingSessions');
+                      'Booked: $newBookedSessions, '
+                      'Available: $newAvailableSessions');
                 }
               }
             }
@@ -292,10 +287,8 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
           'purchaseDate': (data['purchaseDate'] as Timestamp?)?.toDate() ?? DateTime(1970),
           'totalSessions': data['totalSessions'] as int? ?? 0,
           'bookedSessions': (data['bookedSessions'] as num?)?.toInt() ?? 0,
-          'usedSessions': (data['usedSessions'] as num?)?.toInt() ?? 0,
           'availableSessions': (data['totalSessions'] as int? ?? 0) - 
-                            ((data['bookedSessions'] as num?)?.toInt() ?? 0) - 
-                            ((data['usedSessions'] as num?)?.toInt() ?? 0),
+                            ((data['bookedSessions'] as num?)?.toInt() ?? 0),
         };
       }).toList();
 
@@ -467,14 +460,12 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
           // Calculate available sessions correctly
           final totalSessions = purchaseData['totalSessions'] as int? ?? 0;
           final bookedSessions = purchaseData['bookedSessions'] as int? ?? 0;
-          final usedSessions = purchaseData['usedSessions'] as int? ?? 0;
           final availableSessions = totalSessions - bookedSessions;
           
           userPurchasesMap[userId]!.add({
             ...purchaseData,
             'purchaseId': purchaseDoc.id,
             'availableSessions': availableSessions,
-            'remainingSessions': totalSessions - usedSessions,
             'planIndex': userPurchasesMap[userId]!.length, // Track order
           });
         }
@@ -1069,45 +1060,6 @@ class _AdminCreateSlotsScreenState extends State<AdminCreateSlotsScreen> {
                           if (purchaseId != null) {
                             try {
                               await _decrementBookedSessions(purchaseId.toString());
-                              
-                              // ✅ FIXED: Get slotTime from the document ID or slot data
-                              final slotTime = docId.split('|')[1]; // Extract time from docId format: "dateKey|time"
-                              final slotDate = (data['date'] as Timestamp).toDate();
-                              
-                              // ✅ ADDED: If it's a past session, also adjust used sessions
-                              final purchaseDoc = await FirebaseFirestore.instance
-                                  .collection('client_purchases')
-                                  .doc(purchaseId)
-                                  .get();
-                                  
-                              if (purchaseDoc.exists) {
-                                final purchaseData = purchaseDoc.data()!;
-                                final currentUsed = (purchaseData['usedSessions'] as num?)?.toInt() ?? 0;
-                                final totalSessions = (purchaseData['totalSessions'] as num?)?.toInt() ?? 0;
-                                
-                                // Check if this was a past completed session
-                                DateTime slotEndTime;
-                                try {
-                                  slotEndTime = _parseSlotEndTime(slotTime, slotDate);
-                                } catch (e) {
-                                  // Fallback: if parsing fails, assume 1-hour session
-                                  slotEndTime = slotDate.add(Duration(hours: 1));
-                                }
-                                
-                                if (slotEndTime.isBefore(DateTime.now())) {
-                                  // It's a past session - decrement used sessions too
-                                  final newUsedSessions = currentUsed > 0 ? currentUsed - 1 : 0;
-                                  final newRemainingSessions = totalSessions - newUsedSessions;
-                                  
-                                  await purchaseDoc.reference.update({
-                                    'usedSessions': newUsedSessions,
-                                    'remainingSessions': newRemainingSessions,
-                                    'updatedAt': FieldValue.serverTimestamp(),
-                                  });
-                                  
-                                  print('✅ Adjusted used sessions for past session cancellation: $clientId');
-                                }
-                              }
                               
                               print('✅ Successfully decremented sessions for client: $clientId');
                             } catch (e) {
