@@ -55,6 +55,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
   StreamSubscription<QuerySnapshot>? _sessionsSubscription;
   StreamSubscription<User?>? _authSubscription;
   StreamSubscription<DocumentSnapshot>? _profileListener;
+  Timer? _timer;
   
   Map<String, bool> _tabDisabledStatus = {};
 
@@ -78,6 +79,12 @@ class _ClientDashboardState extends State<ClientDashboard> {
     _loadTabDisabledStatus();
     _setupRealTimeSessionListener();
 
+    _timer = Timer.periodic(const Duration(minutes: 1), (timer) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+
     FirebaseMessaging.onMessage.listen((message) {
       if (message.notification != null && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -96,6 +103,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
     _sessionsSubscription?.cancel();
     _authSubscription?.cancel();
     _profileListener?.cancel();
+    _timer?.cancel();
     super.dispose();
   }
 
@@ -138,7 +146,17 @@ class _ClientDashboardState extends State<ClientDashboard> {
       }
     });
   }
-
+  DateTime _parseEndDate(dynamic endDate) {
+    if (endDate is Timestamp) {
+      return endDate.toDate().toLocal();
+    } else if (endDate is String) {
+      return DateTime.parse(endDate).toLocal();
+    } else if (endDate is DateTime) {
+      return endDate.toLocal();
+    } else {
+      return DateTime.now().add(const Duration(days: 1)); // Default to tomorrow if invalid
+    }
+  }
   void _setupProfileImageListener() {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
@@ -221,18 +239,19 @@ class _ClientDashboardState extends State<ClientDashboard> {
       }
     });
 
+    // Add proper subscription status checking with expiration logic
     FirebaseFirestore.instance
-        .collection('client_purchases')
+        .collection('client_subscriptions')
         .where('userId', isEqualTo: uid)
         .snapshots()
-        .listen((_) {
+        .listen((subscriptionSnapshot) {
       if (mounted) {
         setState(() {});
       }
     });
 
     FirebaseFirestore.instance
-        .collection('client_subscriptions')
+        .collection('client_purchases')
         .where('userId', isEqualTo: uid)
         .snapshots()
         .listen((_) {
@@ -600,13 +619,33 @@ class _ClientDashboardState extends State<ClientDashboard> {
                                     }
 
                                     int subCount = 0;
+                                    final now = DateTime.now().toLocal();
                                     
                                     for (final doc in subSnap.data!.docs) {
                                       final data = doc.data() as Map<String, dynamic>;
                                       final isActive = data['isActive'] as bool? ?? false;
                                       final status = (data['status'] as String? ?? 'active').toLowerCase();
+                                      final endDate = data['endDate'];
                                       
-                                      if (isActive && status != 'cancelled') {
+                                      DateTime expirationDate;
+                                      
+                                      // Parse endDate based on its type
+                                      if (endDate is Timestamp) {
+                                        expirationDate = endDate.toDate().toLocal();
+                                      } else if (endDate is String) {
+                                        expirationDate = DateTime.parse(endDate).toLocal();
+                                      } else if (endDate is DateTime) {
+                                        expirationDate = endDate.toLocal();
+                                      } else {
+                                        // If endDate is invalid, skip this subscription
+                                        continue;
+                                      }
+                                      
+                                      final isExpired = expirationDate.isBefore(now);
+                                      final isCancelled = status == 'cancelled';
+                                      
+                                      // Only count active, non-expired, non-cancelled subscriptions
+                                      if (isActive && !isCancelled && !isExpired) {
                                         subCount++;
                                       }
                                     }

@@ -207,7 +207,7 @@ class _PDFWorkoutsTabState extends State<PDFWorkoutsTab> {
       'name': 'PDF Workouts Monthly Subscription',
       'category': 'PDF Access',
       'sessions': 1, // represents 1 month access
-      'price': 999.00, // monthly price (double)
+      'price': 9.99, // monthly price (double)
       'description': 'Unlimited access to all PDF workouts for 30 days',
       'type': 'subscription'
     };
@@ -251,7 +251,7 @@ class _PDFWorkoutsTabState extends State<PDFWorkoutsTab> {
         'userName': userName,
         'userEmail': userEmail,
         'planName': 'PDF Workouts Monthly Subscription',
-        'price': 999.00,
+        'price': 9.99,
         'purchaseDate': _convertToLocalTimeString(now),
         'startDate': _convertToLocalTimeString(now),
         'endDate': _convertToLocalTimeString(endDate),
