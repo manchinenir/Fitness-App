@@ -1,6 +1,4 @@
-import 'dart:async';
 import 'dart:io';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -117,12 +115,76 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
-  // Updated _getGreeting function to use US Eastern Time
+  // ========= Active predicate helpers (respect status + date window) =========
+  bool _isWithin(DateTime now, Timestamp? start, Timestamp? end) {
+    final s = start?.toDate();
+    final e = end?.toDate();
+    final afterStart = (s == null) || !now.isBefore(s);
+    final beforeEnd  = (e == null) || !now.isAfter(e);
+    return afterStart && beforeEnd;
+  }
+
+  bool _isCurrentlyActive(Map<String, dynamic> data) {
+    final status = (data['status'] ?? '').toString().toLowerCase().trim();
+    if (status != 'active') return false;
+
+    return _isWithin(
+      DateTime.now(),
+      data['startDate'] is Timestamp ? data['startDate'] as Timestamp : null,
+      data['endDate']   is Timestamp ? data['endDate']   as Timestamp : null,
+    );
+  }
+
+  bool _isSubscriptionActive(Map<String, dynamic> data) {
+    final status = (data['status'] ?? '').toString().toLowerCase().trim();
+    if (status != 'active') return false;
+
+    // Check if subscription has isActive field
+    final isActive = data['isActive'] == true;
+    if (!isActive) return false;
+
+    // Check date validity
+    final endDate = data['endDate'];
+    if (endDate == null) return true; // No end date = always active
+
+    DateTime end;
+    if (endDate is Timestamp) {
+      end = endDate.toDate();
+    } else if (endDate is DateTime) {
+      end = endDate;
+    } else if (endDate is String) {
+      end = DateTime.tryParse(endDate) ?? DateTime.now().add(const Duration(days: 1));
+    } else {
+      return false;
+    }
+
+    return DateTime.now().isBefore(end);
+  }
+  // =========================================================================
+
+  // (Old _activeMembersStream removed; pie uses nested builders to union purchases+subs)
+
+  Stream<int> _bookedThisWeekStream() {
+    final q = _fs
+        .collection('trainer_slots')
+        .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(_weekStart))
+        .where('date', isLessThan: Timestamp.fromDate(_nextWeekStart))
+        .snapshots();
+    return q.map((snap) {
+      int total = 0;
+      for (final d in snap.docs) {
+        final data = d.data();
+        final booked = (data.containsKey('booked')) ? (data['booked'] as int?) : null;
+        total += booked ?? 0;
+      }
+      return total;
+    });
+  }
+
   String _getGreeting() {
     final nowUtc = DateTime.now().toUtc();
     final year = nowUtc.year;
 
-    // Helper function to find nth Sunday of a month
     DateTime findNthSunday(int year, int month, int n) {
       DateTime date = DateTime.utc(year, month, 1);
       int daysToAdd = (DateTime.sunday - date.weekday + 7) % 7;
@@ -130,32 +192,19 @@ class _AdminDashboardState extends State<AdminDashboard> {
       return date.add(Duration(days: 7 * (n - 1)));
     }
 
-    // DST start: 2nd Sunday in March at 7:00 AM UTC
-    final dstStart = DateTime.utc(year, 3, findNthSunday(year, 3, 2).day, 7);
-
-    // DST end: 1st Sunday in November at 6:00 AM UTC
-    final dstEnd = DateTime.utc(year, 11, findNthSunday(year, 11, 1).day, 6);
-
-    // Determine if we're in DST
-    bool isDST = nowUtc.isAfter(dstStart) && nowUtc.isBefore(dstEnd);
-
-    // Convert to Eastern Time (EST = UTC-5, EDT = UTC-4)
+    final dstStart = DateTime.utc(year, 3, findNthSunday(year, 3, 2).day, 7); // 2nd Sun Mar @07:00 UTC
+    final dstEnd   = DateTime.utc(year, 11, findNthSunday(year, 11, 1).day, 6); // 1st Sun Nov @06:00 UTC
+    final isDST = nowUtc.isAfter(dstStart) && nowUtc.isBefore(dstEnd);
     final easternTime = nowUtc.add(Duration(hours: isDST ? -4 : -5));
     final hour = easternTime.hour;
 
-    if (hour >= 0 && hour < 12) {
-      return 'Good Morning';
-    } else if (hour >= 12 && hour < 17) {
-      return 'Good Afternoon';
-    } else {
-      return 'Good Evening';
-    }
+    if (hour >= 0 && hour < 12) return 'Good Morning';
+    if (hour >= 12 && hour < 17) return 'Good Afternoon';
+    return 'Good Evening';
   }
 
   String _getNameFromEmail(String email) {
-    if (email.contains('@')) {
-      return email.split('@')[0];
-    }
+    if (email.contains('@')) return email.split('@')[0];
     return email;
   }
 
@@ -175,43 +224,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
     } catch (e) {
       debugPrint('Error picking image: $e');
     }
-  }
-
-  /// 🔵 Unique active members count (distinct userId with at least one active purchase)
-  Stream<int> _activeMembersStream() {
-    return _fs
-        .collection('client_purchases')
-        .where('status', isEqualTo: 'active')
-        // If you want "currently valid" only, also require:
-        // .where('startDate', isLessThanOrEqualTo: Timestamp.now())
-        // .where('endDate', isGreaterThanOrEqualTo: Timestamp.now())
-        .snapshots()
-        .map((purchasesSnap) {
-      final activeUserIds = <String>{};
-      for (var doc in purchasesSnap.docs) {
-        final data = doc.data();
-        final userId = data.containsKey('userId') ? (data['userId'] as String?) : null;
-        if (userId != null && userId.isNotEmpty) activeUserIds.add(userId);
-      }
-      return activeUserIds.length;
-    });
-  }
-
-  Stream<int> _bookedThisWeekStream() {
-    final q = _fs
-        .collection('trainer_slots')
-        .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(_weekStart))
-        .where('date', isLessThan: Timestamp.fromDate(_nextWeekStart))
-        .snapshots();
-    return q.map((snap) {
-      int total = 0;
-      for (final d in snap.docs) {
-        final data = d.data();
-        final booked = (data.containsKey('booked')) ? (data['booked'] as int?) : null;
-        total += booked ?? 0;
-      }
-      return total;
-    });
   }
 
   DateTime _mondayStart(DateTime d) {
@@ -314,20 +326,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           ),
                         ],
                       ),
-
                       const SizedBox(width: 12),
                       Expanded(
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              _getGreeting(),
-                              style: const TextStyle(color: Colors.white70, fontSize: 14),
-                            ),
+                            Text(_getGreeting(), style: const TextStyle(color: Colors.white70, fontSize: 14)),
                             const SizedBox(height: 4),
-
-                            /// 🔑 Updated: Admin name comes live from Firestore now
                             if (user != null)
                               StreamBuilder<DocumentSnapshot>(
                                 stream: _fs.collection('users').doc(user.uid).snapshots(),
@@ -346,7 +352,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                       ),
                                     );
                                   }
-                                  // fallback while loading
                                   return Text(
                                     adminName,
                                     style: const TextStyle(
@@ -369,7 +374,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           ],
                         ),
                       ),
-
                       IconButton(
                         icon: const Icon(Icons.logout, color: Colors.white, size: 26),
                         onPressed: () => Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false),
@@ -387,38 +391,108 @@ class _AdminDashboardState extends State<AdminDashboard> {
               delegate: SliverChildListDelegate([
                 Row(
                   children: [
-                    // 🔵 LEFT: Active Members pie showing Active / Total Clients (tap to open details page)
+                    // 🔵 LEFT: Active Members pie (UNION of active purchases + subscriptions; respects dates)
                     Expanded(
-                      child: StreamBuilder<int>(
-                        stream: _activeMembersStream(),
-                        builder: (context, snap) {
-                          final activeCount = snap.data ?? 0;
+                      child: StreamBuilder<QuerySnapshot>(
+                        stream: _fs
+                            .collection('client_purchases')
+                            .where('status', isEqualTo: 'active')
+                            .snapshots(),
+                        builder: (context, purchasesSnap) {
+                          if (purchasesSnap.connectionState == ConnectionState.waiting) {
+                            return _buildPieChartCard(
+                              title: 'Active Members',
+                              value: '—',
+                              subtitle: 'Loading',
+                              percentage: 0,
+                              color: Colors.indigo,
+                            );
+                          }
+                          if (purchasesSnap.hasError) {
+                            return _buildPieChartCard(
+                              title: 'Active Members',
+                              value: '0',
+                              subtitle: 'Error',
+                              percentage: 0,
+                              color: Colors.indigo,
+                            );
+                          }
 
-                          return FutureBuilder<QuerySnapshot>(
-                            future: _fs.collection('users').where('role', isEqualTo: 'client').get(),
-                            builder: (context, usersSnap) {
-                              final totalClients = usersSnap.data?.docs.length ?? 0;
-                              final pct = totalClients == 0
-                                  ? 0.0
-                                  : (activeCount / totalClients).clamp(0.0, 1.0);
+                          final activePurchaseUsers = <String>{};
+                          for (final d in (purchasesSnap.data?.docs ?? [])) {
+                            final m = d.data() as Map<String, dynamic>;
+                            if (_isCurrentlyActive(m)) {
+                              final uid = (m['userId'] ?? '').toString();
+                              if (uid.isNotEmpty) activePurchaseUsers.add(uid);
+                            }
+                          }
 
-                              return InkWell(
-                                onTap: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => const ActiveMembersScreen(),
+                          return StreamBuilder<QuerySnapshot>(
+                            stream: _fs
+                                .collection('client_subscriptions')
+                                .where('status', isEqualTo: 'active')
+                                .snapshots(),
+                            builder: (context, subsSnap) {
+                              if (subsSnap.connectionState == ConnectionState.waiting) {
+                                return _buildPieChartCard(
+                                  title: 'Active Members',
+                                  value: '—',
+                                  subtitle: 'Loading',
+                                  percentage: 0,
+                                  color: Colors.indigo,
+                                );
+                              }
+                              if (subsSnap.hasError) {
+                                // Fall back to purchases-only if subs had an error
+                                return _buildPieChartCard(
+                                  title: 'Active Members',
+                                  value: activePurchaseUsers.length.toString(),
+                                  subtitle: 'of —',
+                                  percentage: 0,
+                                  color: Colors.indigo,
+                                );
+                              }
+
+                              final usersWithSubs = <String>{};
+                              for (final d in (subsSnap.data?.docs ?? [])) {
+                                final m = d.data() as Map<String, dynamic>;
+                                // Use the same subscription check as in ActiveMembersScreen
+                                if (_isSubscriptionActive(m)) {
+                                  final uid = (m['userId'] ?? '').toString();
+                                  if (uid.isNotEmpty) usersWithSubs.add(uid);
+                                }
+                              }
+
+                              final activeUsersUnion = <String>{}
+                                ..addAll(activePurchaseUsers)
+                                ..addAll(usersWithSubs);
+
+                              return FutureBuilder<QuerySnapshot>(
+                                future: _fs.collection('users').where('role', isEqualTo: 'client').get(),
+                                builder: (context, usersSnap) {
+                                  final totalClients = usersSnap.data?.docs.length ?? 0;
+                                  final activeCount = activeUsersUnion.length;
+                                  final pct = totalClients == 0
+                                      ? 0.0
+                                      : (activeCount / totalClients).clamp(0.0, 1.0);
+
+                                  return InkWell(
+                                    onTap: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(builder: (_) => const ActiveMembersScreen()),
+                                      );
+                                    },
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: _buildPieChartCard(
+                                      title: 'Active Members',
+                                      value: activeCount.toString(),
+                                      subtitle: totalClients > 0 ? 'of $totalClients' : 'Active',
+                                      percentage: pct,
+                                      color: Colors.indigo,
                                     ),
                                   );
                                 },
-                                borderRadius: BorderRadius.circular(12),
-                                child: _buildPieChartCard(
-                                  title: 'Active Members',
-                                  value: activeCount.toString(),
-                                  subtitle: totalClients > 0 ? 'of $totalClients' : 'Active',
-                                  percentage: pct,
-                                  color: Colors.indigo,
-                                ),
                               );
                             },
                           );
@@ -651,7 +725,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 }
 
-// ===== New Schedule Slots Detail Screen (kept from your version) =====
+// ===== Schedule Slots Detail Screen (unchanged functional logic) =====
 class ScheduleSlotsDetailScreen extends StatefulWidget {
   final DateTime weekStart;
   final DateTime nextWeekStart;
@@ -697,9 +771,7 @@ class _ScheduleSlotsDetailScreenState extends State<ScheduleSlotsDetailScreen> {
         final String time = data['time'] ?? '00:00';
         final int booked = data['booked'] ?? 0;
 
-        // Only include slots with actual bookings
         if (booked > 0) {
-          // Parse the time string to get start and end times
           final timeParts = time.split(' - ');
           final startTimeStr = timeParts.isNotEmpty ? timeParts[0] : '00:00';
           String endTimeStr = timeParts.length > 1 ? timeParts[1] : '';
@@ -729,7 +801,7 @@ class _ScheduleSlotsDetailScreenState extends State<ScheduleSlotsDetailScreen> {
         }
       }
 
-      // Sort: by status order first (TODAY, UPCOMING, COMPLETED), then by date/time
+      // Sort: TODAY, UPCOMING, COMPLETED; within groups by time (COMPLETED desc)
       slots.sort((a, b) {
         final orderA = _getOrder(a.status);
         final orderB = _getOrder(b.status);
@@ -858,11 +930,7 @@ class _ScheduleSlotsDetailScreenState extends State<ScheduleSlotsDetailScreen> {
           const SizedBox(height: 12),
           Row(
             children: [
-              const Icon(
-                Icons.access_time,
-                color: Color(0xFF1C2D5E),
-                size: 20,
-              ),
+              const Icon(Icons.access_time, color: Color(0xFF1C2D5E), size: 20),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -875,11 +943,7 @@ class _ScheduleSlotsDetailScreenState extends State<ScheduleSlotsDetailScreen> {
           const SizedBox(height: 12),
           Row(
             children: [
-              const Icon(
-                Icons.event_seat,
-                color: Color(0xFF1C2D5E),
-                size: 20,
-              ),
+              const Icon(Icons.event_seat, color: Color(0xFF1C2D5E), size: 20),
               const SizedBox(width: 8),
               Text(
                 '${slot.booked} booked slot${slot.booked > 1 ? 's' : ''}',
@@ -891,11 +955,7 @@ class _ScheduleSlotsDetailScreenState extends State<ScheduleSlotsDetailScreen> {
             const SizedBox(height: 12),
             Row(
               children: [
-                const Icon(
-                  Icons.people,
-                  color: Color(0xFF1C2D5E),
-                  size: 20,
-                ),
+                const Icon(Icons.people, color: Color(0xFF1C2D5E), size: 20),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
