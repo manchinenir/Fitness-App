@@ -398,9 +398,9 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> with SingleTicker
       ),
     );
 
-    if (result == true) {
-      await _completePlanPurchaseAfterPayment(plan);
-    }
+   // if (result == true) {
+   //   await _completePlanPurchaseAfterPayment(plan);
+   // }
     setState(() => _isProcessingPayment = false);
   }
 

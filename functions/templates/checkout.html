@@ -7,41 +7,45 @@
   <script src="https://web.squarecdn.com/v1/square.js"></script>
   <style>
     :root{
-      --primary:#1C2D5E;--primary-dark:#152347;--primary-light:#2a3f7a;
-      --success:#0a6;--error:#d32f2f;--text:#333;--text-light:#666;
-      --background:#f5f7fb;--surface:#fff;--border:#e7e9ef;--shadow:0 10px 30px rgba(0,0,0,.08)
+      --primary:#1C2D5E;--primary-light:#2a3f7a;
+      --success:#0a6;--error:#d32f2f;--text:#333;--background:#f5f7fb;--surface:#fff;--border:#e7e9ef;--shadow:0 10px 30px rgba(0,0,0,.08)
     }
     *{margin:0;padding:0;box-sizing:border-box}
-    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,Cantarell,sans-serif;background:var(--background);color:var(--text);line-height:1.6;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+    body{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--background);color:var(--text);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
     .container{max-width:560px;width:100%}
     .card{background:var(--surface);border-radius:20px;padding:28px;box-shadow:var(--shadow);border:1px solid var(--border)}
     .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
     .brand{display:flex;gap:10px;align-items:center}
     .logo{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--primary),var(--primary-light))}
     .title{font-weight:800;font-size:18px;color:var(--primary)}
-    .price-badge{background:linear-gradient(135deg,var(--primary),var(--primary-light));color:#fff;padding:10px 14px;border-radius:12px;font-weight:700}
+    .price-badge{background:linear-gradient(135deg,var(--primary),var(--primary-light));color:#fff;padding:10px 14px;border-radius:12px;font-weight:700;white-space:nowrap}
     .section{margin-top:18px}
     .section h3{font-size:14px;color:var(--primary);letter-spacing:.4px;margin-bottom:10px}
     .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-    .input{display:flex;flex-direction:column;gap:8px}
-    .input label{font-size:12px;color:#57607a}
-    .input input{padding:12px 12px;border:1px solid var(--border);border-radius:12px;font-size:14px;outline:none;background:#fbfcff}
-    .input input:focus{border-color:var(--primary);box-shadow:0 0 0 4px rgba(28,45,94,.10)}
+    .input{display:flex;flex-direction:column;gap:6px}
+    .input label{font-size:11px;color:#57607a;white-space:normal;word-break:break-word}
+    .input input{padding:12px;border:1px solid var(--border);border-radius:12px;font-size:14px;background:#fbfcff;width:100%}
+    .input input:focus{border-color:var(--primary);box-shadow:0 0 0 4px rgba(28,45,94,.10);outline:none}
     #card-container{border:1.5px dashed var(--border);border-radius:14px;padding:14px;background:#fff;min-height:62px;display:flex;align-items:center}
+    .card-placeholder{font-size:13px;color:#9aa1b7}
     .btn{width:100%;padding:14px 16px;border:none;border-radius:14px;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;margin-top:14px;background:var(--primary);color:#fff}
-    .btn.secondary{background:#000;color:#fff}
+    .btn.secondary{background:#000}
     .btn:disabled{opacity:.6;cursor:not-allowed}
-    .sub{font-size:12px;color:#6c7590;margin-top:6px}
     .message{border-radius:12px;padding:12px;margin-top:14px;font-size:14px;display:none}
     .message.error{background:rgba(211,47,47,.06);color:var(--error);border:1px solid rgba(211,47,47,.2);display:block}
     .message.success{background:rgba(10,102,0,.06);color:var(--success);border:1px solid rgba(10,102,0,.2);display:block}
-    .hidden{display:none!important}
     .footnote{margin-top:10px;text-align:center;color:#8b91a6;font-size:12px}
+    #payLoading{width:18px;height:18px;border:2px solid transparent;border-top:2px solid #fff;border-radius:50%;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @media (max-width:480px){.card{padding:20px;border-radius:16px}.title{font-size:16px}.price-badge{padding:8px 10px;font-size:13px}.row{grid-template-columns:1fr}}
+    .success-panel{display:none;margin-top:14px;padding:18px;border-radius:14px;border:1px solid rgba(10,102,0,.2);background:rgba(10,102,0,.06)}
+    .success-panel h4{margin-bottom:6px}
+    .return-btn{margin-top:12px;background:#0a6}
   </style>
 </head>
 <body>
   <div class="container">
-    <div class="card">
+    <div class="card" id="checkoutCard">
       <div class="header">
         <div class="brand">
           <div class="logo"></div>
@@ -50,76 +54,86 @@
         <div class="price-badge" id="amountDisplay">$0.00</div>
       </div>
 
-      <!-- Buyer details -->
-      <div class="section">
-        <h3>Contact</h3>
-        <div class="row">
-          <div class="input">
-            <label for="firstName">First name</label>
-            <input id="firstName" type="text" placeholder="Jane"/>
+      <div id="formArea">
+        <!-- Contact -->
+        <div class="section">
+          <h3>Contact</h3>
+          <div class="row">
+            <div class="input">
+              <label for="firstName">First name</label>
+              <input id="firstName" type="text" placeholder="Jane"/>
+            </div>
+            <div class="input">
+              <label for="lastName">Last name</label>
+              <input id="lastName" type="text" placeholder="Doe"/>
+            </div>
           </div>
-          <div class="input">
-            <label for="lastName">Last name</label>
-            <input id="lastName" type="text" placeholder="Doe"/>
+          <div class="row">
+            <div class="input" style="grid-column:1 / -1">
+              <label for="email">Email (for receipt)</label>
+              <input id="email" type="email" placeholder="jane@example.com"/>
+            </div>
           </div>
         </div>
-        <div class="row">
-          <div class="input" style="grid-column:1 / -1">
-            <label for="email">Email (receipt)</label>
-            <input id="email" type="email" placeholder="jane@example.com"/>
+
+        <!-- Address -->
+        <div class="section">
+          <h3>Billing address (optional)</h3>
+          <div class="row">
+            <div class="input" style="grid-column:1 / -1">
+              <label for="address1">Address line 1</label>
+              <input id="address1" type="text" placeholder="123 Main St"/>
+            </div>
+          </div>
+          <div class="row">
+            <div class="input">
+              <label for="locality">City</label>
+              <input id="locality" type="text" placeholder="San Francisco"/>
+            </div>
+            <div class="input">
+              <label for="administrativeDistrictLevel1">State / Region</label>
+              <input id="administrativeDistrictLevel1" type="text" placeholder="CA"/>
+            </div>
+          </div>
+          <div class="row">
+            <div class="input">
+              <label for="postalCode">Postal code</label>
+              <input id="postalCode" type="text" placeholder="94105"/>
+            </div>
+            <div class="input">
+              <label for="country">Country</label>
+              <input id="country" type="text" placeholder="US"/>
+            </div>
           </div>
         </div>
+
+        <!-- Wallet -->
+        <div class="section">
+          <h3>Wallet</h3>
+          <button id="applePayBtn" class="btn secondary" type="button" style="display:none"> Apple Pay</button>
+        </div>
+
+        <!-- Card -->
+        <div class="section">
+          <h3>Card</h3>
+          <div id="card-container"><div class="card-placeholder">Enter your card details</div></div>
+          <button id="payBtn" class="btn" type="button">
+            <span id="payText">Pay Now</span>
+            <div id="payLoading" style="display:none"></div>
+          </button>
+        </div>
+
+        <div id="message" class="message"></div>
       </div>
 
-      <!-- Address (optional, improves fraud checks) -->
-      <div class="section">
-        <h3>Billing address (optional)</h3>
-        <div class="row">
-          <div class="input" style="grid-column:1 / -1">
-            <label for="address1">Address line 1</label>
-            <input id="address1" type="text" placeholder="123 Main St"/>
-          </div>
-        </div>
-        <div class="row">
-          <div class="input">
-            <label for="locality">City</label>
-            <input id="locality" type="text" placeholder="San Francisco"/>
-          </div>
-          <div class="input">
-            <label for="administrativeDistrictLevel1">State/Region</label>
-            <input id="administrativeDistrictLevel1" type="text" placeholder="CA"/>
-          </div>
-        </div>
-        <div class="row">
-          <div class="input">
-            <label for="postalCode">Postal code</label>
-            <input id="postalCode" type="text" placeholder="94105"/>
-          </div>
-          <div class="input">
-            <label for="country">Country</label>
-            <input id="country" type="text" placeholder="US"/>
-          </div>
-        </div>
+      <!-- Success screen -->
+      <div id="successPanel" class="success-panel">
+        <h4>✅ Payment successful</h4>
+        <div id="successText" style="font-size:14px;color:#0a6">Your plan is now active. You can return to the app.</div>
+        <a id="returnDeepLink" class="btn return-btn" href="#">Return to App</a>
+        <div class="footnote" style="margin-top:8px">You can also close this tab and switch back to the app.</div>
       </div>
 
-      <!-- Wallet -->
-      <div class="section">
-        <h3>Wallet</h3>
-        <button id="applePayBtn" class="btn secondary hidden" type="button"> Apple Pay</button>
-        <div class="sub">Fast checkout if available on this device.</div>
-      </div>
-
-      <!-- Card -->
-      <div class="section">
-        <h3>Card</h3>
-        <div id="card-container"><div class="card-placeholder">Enter your card details</div></div>
-        <button id="payBtn" class="btn" type="button">
-          <span id="payText">Pay Now</span>
-          <div id="payLoading" class="hidden" style="width:18px;height:18px;border:2px solid transparent;border-top:2px solid #fff;border-radius:50%;animation:spin 1s linear infinite"></div>
-        </button>
-      </div>
-
-      <div id="message" class="message hidden"></div>
       <div class="footnote">Secured by Square</div>
     </div>
   </div>
@@ -127,13 +141,75 @@
   <script>
     const $ = (id) => document.getElementById(id);
     const fmt = (c) => `$${(c/100).toFixed(2)}`;
-    const setLoading = (v)=>{ $('payBtn').disabled=v; $('payText').classList.toggle("hidden",v); $('payLoading').classList.toggle("hidden",!v); };
-    const showMsg = (t,type="error")=>{ const el=$('message'); el.textContent=t; el.className=`message ${type}`; el.style.display='block'; };
+    const setLoading = (v)=>{
+      $('payBtn').disabled=v;
+      $('payText').style.display = v ? 'none' : '';
+      $('payLoading').style.display = v ? '' : 'none';
+    };
+    const showMsg = (t,type="error")=>{
+      const el=$('message');
+      el.textContent=t;
+      el.className=`message ${type}`;
+      el.style.display='block';
+    };
     const postToFlutter = (p)=> {
       const s = JSON.stringify(p);
       if (window.SquareBridge?.postMessage) window.SquareBridge.postMessage(s);
-      else location.href = 'sqbridge://message?data=' + encodeURIComponent(s);
+      else try { location.href = 'sqbridge://message?data=' + encodeURIComponent(s); } catch(_) {}
     };
+
+    function collectBuyer(qs) {
+      return {
+        userId: qs.get('userId') || '',
+        planId: qs.get('planId') || '',
+        planName: qs.get('planName') || 'Training Plan',
+        planCategory: qs.get('planCategory') || '',
+        description: qs.get('description') || '',
+        sessions: Number(qs.get('sessions') || '0'),
+        price: Number(qs.get('price') || '0'),
+        firstName: $('firstName').value.trim() || qs.get('firstName') || '',
+        lastName: $('lastName').value.trim()  || qs.get('lastName')  || '',
+        email: $('email').value.trim()        || qs.get('email')     || '',
+      };
+    }
+
+    async function chargeServer(apiUrl, payload) {
+      const resp = await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await resp.json().catch(()=>({}));
+
+      if (!resp.ok || !data.ok) {
+        const raw = data.error || data.message || `Payment failed (HTTP ${resp.status})`;
+        const msg = (typeof raw === 'string' && raw.length > 200) ? "Payment failed. Please check your card or try another one." : raw;
+        showMsg(msg,"error");
+        postToFlutter({ ok:false, error: msg, status: resp.status });
+        return false;
+      }
+
+      // ✅ SUCCESS UI
+      $('formArea').style.display = 'none';
+      $('successPanel').style.display = 'block';
+      showMsg("Payment processed successfully!","success");
+      postToFlutter({ ok:true, paymentId:data.paymentId, result:data.result });
+
+      // Prepare deep link back to app (if configured)
+      const qs = new URLSearchParams(location.search);
+      const ref = (qs.get('ref') || '').slice(0,40);
+      const deep = `flexfacility://purchase/success?ref=${encodeURIComponent(ref)}`;
+      $('returnDeepLink').href = deep;
+
+      // WebView helper (if in-app)
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('ff_status', 'success');
+        window.history.replaceState({}, "", url.toString());
+      } catch (_){}
+
+      return true;
+    }
 
     (async () => {
       try {
@@ -156,34 +232,22 @@
 
         const payments = window.Square.payments(APP_ID, LOCATION_ID);
 
-        // ---------- Apple Pay ----------
-        let applePayInstance;
+        // Apple Pay (optional)
         try {
-          applePayInstance = await payments.applePay({
-            countryCode: "US",
-            currencyCode: "USD",
-            // IMPORTANT: configure this in your Apple & Square dashboards
-            merchantId: "REPLACE_WITH_YOUR_APPLE_PAY_MERCHANT_ID"
-          });
-          const canUse = await applePayInstance.canMakePayment();
+          const applePay = await payments.applePay({ countryCode:"US", currencyCode:"USD", merchantId:"REPLACE_WITH_YOUR_APPLE_PAY_MERCHANT_ID" });
+          const canUse = await applePay.canMakePayment();
           if (canUse) {
             const btn = $('applePayBtn');
-            btn.classList.remove('hidden');
+            btn.style.display = '';
             btn.addEventListener('click', async () => {
-              setLoading(true);
+              setLoading(true); $('message').style.display='none';
               try {
-                const result = await applePayInstance.tokenize({
-                  total: { amount: (AMOUNT_CENTS/100).toFixed(2), label: "Flex Facility" }
-                });
-                if (result.status !== "OK") {
-                  const m = result.errors?.[0]?.message || "Apple Pay failed";
-                  throw new Error(m);
-                }
+                const result = await applePay.tokenize({ total:{ amount:(AMOUNT_CENTS/100).toFixed(2), label:"Flex Facility" } });
+                if (result.status !== "OK") throw new Error(result.errors?.[0]?.message || "Apple Pay failed");
                 await chargeServer(API_URL, {
                   token: result.token,
                   amountCents: AMOUNT_CENTS,
                   locationId: LOCATION_ID,
-                  // enrich
                   referenceId: (qs.get('ref') || '').slice(0,40),
                   buyer: collectBuyer(qs)
                 });
@@ -192,40 +256,29 @@
                 postToFlutter({ ok:false, error: err.message || String(err) });
               } finally { setLoading(false); }
             });
-
-            // Auto-open sheet when requested
-            if (WALLET === 'apple') {
-              setTimeout(() => btn.click(), 120);
-            }
+            if (WALLET === 'apple') setTimeout(() => btn.click(), 120);
           }
-        } catch (e) {
-          console.warn("Apple Pay not available:", e);
-        }
+        } catch(e){ console.warn("Apple Pay not available:", e); }
 
-        // ---------- Card ----------
+        // Card
         const card = await payments.card();
         await card.attach("#card-container");
+        $('card-container').querySelector('.card-placeholder')?.remove?.();
+
         $('payBtn').addEventListener('click', async () => {
           setLoading(true); $('message').style.display='none';
           try {
             const tok = await card.tokenize();
-            if (tok.status !== "OK") {
-              const m = tok.errors?.[0]?.message || "Card tokenization failed";
-              throw new Error(m);
-            }
+            if (tok.status !== "OK") throw new Error(tok.errors?.[0]?.message || "Card tokenization failed");
 
-            // optional buyer verification
+            // optional: 3DS
             let verificationToken;
             try {
-              const vr = await payments.verifyBuyer(tok.token, {
-                amount: (AMOUNT_CENTS/100).toFixed(2),
-                currencyCode: "USD",
-                intent: "CHARGE"
-              });
+              const vr = await payments.verifyBuyer(tok.token, { amount:(AMOUNT_CENTS/100).toFixed(2), currencyCode:"USD", intent:"CHARGE" });
               verificationToken = vr?.token;
-            } catch (e) { console.warn('verifyBuyer error:', e); }
+            } catch(e){ console.warn("verifyBuyer:", e); }
 
-            await chargeServer(API_URL, {
+            const ok = await chargeServer(API_URL, {
               token: tok.token,
               verificationToken,
               amountCents: AMOUNT_CENTS,
@@ -233,6 +286,8 @@
               referenceId: (qs.get('ref') || '').slice(0,40),
               buyer: collectBuyer(qs)
             });
+
+            // If OK and running in WebView, your app can intercept ff_status or message bridge.
           } catch (err) {
             showMsg(err.message || "Payment error","error");
             postToFlutter({ ok:false, error: err.message || String(err) });
@@ -245,39 +300,6 @@
         $('payBtn').disabled = true; $('payText').textContent = "Payment Unavailable";
       }
     })();
-
-    function collectBuyer(qs) {
-      return {
-        planName: qs.get('planName') || 'Training Plan',
-        firstName: $('firstName').value.trim() || qs.get('firstName') || '',
-        lastName: $('lastName').value.trim()  || qs.get('lastName')  || '',
-        email: $('email').value.trim()        || qs.get('email')     || '',
-        address: {
-          addressLine1: $('address1').value.trim(),
-          locality: $('locality').value.trim(),
-          administrativeDistrictLevel1: $('administrativeDistrictLevel1').value.trim(),
-          postalCode: $('postalCode').value.trim(),
-          country: $('country').value.trim() || 'US'
-        }
-      };
-    }
-
-    async function chargeServer(apiUrl, payload) {
-      const resp = await fetch(apiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Accept": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const data = await resp.json().catch(()=>({}));
-      if (!resp.ok || !data.ok) {
-        const m = data.error || data.message || `Payment failed (HTTP ${resp.status})`;
-        showMsg(m,"error");
-        postToFlutter({ ok:false, error:m, status:resp.status });
-        return;
-      }
-      showMsg("Payment processed successfully!","success");
-      postToFlutter({ ok:true, paymentId:data.paymentId, result:data.result });
-    }
   </script>
 </body>
 </html>

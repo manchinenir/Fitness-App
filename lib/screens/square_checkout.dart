@@ -1,14 +1,11 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';              // (optional) for kReleaseMode if you later want branching
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:url_launcher/url_launcher.dart';       // ✅ use external browser
+import 'package:url_launcher/url_launcher.dart';
 
-// No more: import 'package:webview_flutter/webview_flutter.dart';
-// No more: import 'checkout_webview.dart';
 import 'invoice_review_page.dart';
 
+/// (Optional) old in-app WebView launcher, now unused if you only use external browser
 class SquareWebCheckout extends StatefulWidget {
   const SquareWebCheckout({
     super.key,
@@ -57,7 +54,8 @@ class _SquareWebCheckoutState extends State<SquareWebCheckout> {
     };
 
     final qp = params.entries
-        .map((e) => '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}')
+        .map((e) =>
+            '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}')
         .join('&');
 
     return '${widget.functionsBaseUrl}/checkout?$qp';
@@ -106,8 +104,8 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
   bool _isProcessingPayment = false;
   String? _errorMessage;
 
-  static const String _apiUrl =
-      'https://us-central1-flex-facility-app-b55aa.cloudfunctions.net/api/process-payment';
+  static const String _apiBase =
+      'https://us-central1-flex-facility-app-b55aa.cloudfunctions.net/api';
 
   Future<void> _openWebCheckout() async {
     setState(() {
@@ -139,8 +137,8 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
       // Short reference (<= 40 chars)
       final planId = (widget.plan['docId'] ?? 'plan').toString();
       final refId = [
-        uid.substring(0, 8),
-        planId.substring(0, 8),
+        uid.length >= 8 ? uid.substring(0, 8) : uid,
+        planId.length >= 8 ? planId.substring(0, 8) : planId,
         DateTime.now().millisecondsSinceEpoch.toRadixString(36),
       ].join('-');
 
@@ -154,7 +152,8 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
       );
 
       // ✅ Always open in system browser now
-      final ok = await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      final ok =
+          await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
       if (!ok) {
         throw 'Could not launch checkout';
       }
@@ -162,11 +161,9 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
       if (!mounted) return;
       setState(() => _isProcessingPayment = false);
 
-      // You can either pop back immediately…
-      // Navigator.of(context).pop(true);
-
-      // …or stay on this screen and show nothing. If you need to detect success,
-      // do it via backend webhook + polling or deep link callback.
+      // We do not pop with a result here – backend writes client_purchases.
+      // When user comes back to app, streams in ClientPlansScreen/Dashboard
+      // will see the new active plan automatically.
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -186,6 +183,16 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
   }) {
     const base =
         'https://us-central1-flex-facility-app-b55aa.cloudfunctions.net/api';
+
+    final user = FirebaseAuth.instance.currentUser;
+    final uid = user?.uid ?? '';
+
+    final sessions = (widget.plan['sessions'] as int?) ?? 0;
+    final price = (widget.plan['price'] ?? 0).toDouble();
+    final category = (widget.plan['category'] as String?) ?? '';
+    final description = (widget.plan['description'] as String?) ?? '';
+    final planId = (widget.plan['docId'] ?? '').toString();
+
     final params = {
       'amountCents': amountCents.toString(),
       'appId': widget.squareApplicationId,
@@ -193,13 +200,21 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
       'env': 'production',
       'apiUrl': '$base/process-payment',
       'planName': planName,
+      'userId': uid,
+      'planId': planId,
+      'sessions': sessions.toString(),
+      'priceDollars': price.toStringAsFixed(2),
+      'planCategory': category,
+      'planDescription': description,
       if (firstName != null && firstName.isNotEmpty) 'firstName': firstName,
       if (lastName != null && lastName.isNotEmpty) 'lastName': lastName,
       if (email != null && email.isNotEmpty) 'email': email,
       if (referenceId != null && referenceId.isNotEmpty) 'ref': referenceId,
     };
+
     final qp = params.entries
-        .map((e) => '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}')
+        .map((e) =>
+            '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}')
         .join('&');
     return '$base/checkout?$qp';
   }
@@ -212,8 +227,7 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
           plan: widget.plan,
           squareApplicationId: widget.squareApplicationId,
           squareLocationId: widget.squareLocationId,
-          functionsBaseUrl:
-              'https://us-central1-flex-facility-app-b55aa.cloudfunctions.net/api',
+          functionsBaseUrl: _apiBase,
         ),
       ),
     );
@@ -248,8 +262,8 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
           children: [
             Card(
               elevation: 4,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16)),
+              shape:
+                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(20),
@@ -307,8 +321,8 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
             const SizedBox(height: 16),
             Card(
               elevation: 2,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
+              shape:
+                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               child: ListTile(
                 leading: Container(
                   padding: const EdgeInsets.all(8),
@@ -322,14 +336,14 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
                 subtitle: const Text('Secure payment via Square'),
                 trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                 onTap: _isProcessingPayment ? null : _openWebCheckout,
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 8),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               ),
             ),
             Card(
               elevation: 2,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
+              shape:
+                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               child: ListTile(
                 leading: Container(
                   padding: const EdgeInsets.all(8),
@@ -344,8 +358,8 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
                 subtitle: const Text('Open Square hosted invoice'),
                 trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                 onTap: _isProcessingPayment ? null : _openInvoicePage,
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 8),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               ),
             ),
             if (_errorMessage != null) ...[

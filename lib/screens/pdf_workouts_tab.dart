@@ -793,6 +793,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
 // ================= Subscription Payment Page =================
 
+// ================= Subscription Payment Page =================
+
 class SubscriptionPaymentPage extends StatefulWidget {
   final Map<String, dynamic> plan;
   final String squareApplicationId;
@@ -806,12 +808,49 @@ class SubscriptionPaymentPage extends StatefulWidget {
   });
 
   @override
-  State<SubscriptionPaymentPage> createState() => _SubscriptionPaymentPageState();
+  State<SubscriptionPaymentPage> createState() =>
+      _SubscriptionPaymentPageState();
 }
 
 class _SubscriptionPaymentPageState extends State<SubscriptionPaymentPage> {
   bool _isProcessingPayment = false;
   String? _errorMessage;
+
+  static const String _apiBase =
+      'https://us-central1-flex-facility-app-b55aa.cloudfunctions.net/api';
+
+  /// Build the same Square checkout URL as plans (card details page in HTML)
+  String _buildSubscriptionCheckoutUrl({
+    required int amountCents,
+    required String planName,
+    String? firstName,
+    String? lastName,
+    String? email,
+  }) {
+    // Use 'sandbox' while you are testing with sandbox app/location IDs
+    const env = 'sandbox';
+
+    final params = <String, String>{
+      'amountCents': amountCents.toString(),
+      'appId': widget.squareApplicationId,
+      'locationId': widget.squareLocationId,
+      'env': env,
+      'apiUrl': '$_apiBase/process-payment',
+      'planName': planName,
+
+      // Optional prefill
+      if (firstName != null && firstName.isNotEmpty) 'firstName': firstName,
+      if (lastName != null && lastName.isNotEmpty) 'lastName': lastName,
+      if (email != null && email.isNotEmpty) 'email': email,
+    };
+
+    final qp = params.entries
+        .map((e) =>
+            '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}')
+        .join('&');
+
+    return '$_apiBase/checkout?$qp';
+  }
 
   Future<void> _openWebCheckout() async {
     setState(() {
@@ -823,32 +862,70 @@ class _SubscriptionPaymentPageState extends State<SubscriptionPaymentPage> {
       final double price = (widget.plan['price'] ?? 0).toDouble();
       final int amountCents = (price * 100).round();
 
-      final result = await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => SquareWebCheckout(
-            amountCents: amountCents,
-            appId: widget.squareApplicationId,
-            locationId: widget.squareLocationId,
-            functionsBaseUrl: 'https://us-central1-flex-facility-app-b55aa.cloudfunctions.net/api',
-            production: false,
-          ),
-        ),
+      // Get user info for prefill
+      final user = FirebaseAuth.instance.currentUser;
+      final uid = user?.uid ?? 'anon';
+      String email = user?.email ?? '';
+      String firstName = '';
+      String lastName = '';
+
+      try {
+        final doc =
+            await FirebaseFirestore.instance.collection('users').doc(uid).get();
+        final data = doc.data();
+
+        final fullName = (data?['name'] as String?)?.trim() ??
+            (user?.displayName ?? '').trim();
+        if (fullName.isNotEmpty) {
+          final parts = fullName.split(RegExp(r'\s+'));
+          firstName = parts.first;
+          if (parts.length > 1) {
+            lastName = parts.sublist(1).join(' ');
+          }
+        }
+
+        final docEmail = (data?['email'] as String?)?.trim();
+        if (docEmail != null && docEmail.isNotEmpty) {
+          email = docEmail;
+        }
+      } catch (_) {
+        // ignore profile errors, just use whatever we have
+      }
+
+      final url = _buildSubscriptionCheckoutUrl(
+        amountCents: amountCents,
+        planName:
+            widget.plan['name'] as String? ?? 'PDF Workouts Monthly Subscription',
+        firstName: firstName,
+        lastName: lastName,
+        email: email,
       );
 
-      if (!mounted) return;
-
-      if (result != null && result['ok'] == true) {
-        Navigator.of(context).pop(true);
-      } else if (result != null) {
-        setState(() {
-          _errorMessage = result['error']?.toString() ?? 'Payment failed';
-          _isProcessingPayment = false;
-        });
-      } else {
-        setState(() => _isProcessingPayment = false);
+      final ok = await launchUrl(
+        Uri.parse(url),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!ok) {
+        throw 'Could not launch checkout';
       }
+
+      if (!mounted) return;
+      setState(() => _isProcessingPayment = false);
+
+      // Inform user they must finish payment in browser
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content:
+            Text('Complete the payment in your browser, then return to the app.'),
+      ));
+
+      // NOTE:
+      // If you want to auto-activate subscription here regardless of real payment:
+      // Navigator.of(context).pop(true);
+      //
+      // For now we just stay on this screen and let the
+      // caller decide how to handle activation (e.g. via a separate button).
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Error starting checkout: $e';
         _isProcessingPayment = false;
@@ -864,7 +941,7 @@ class _SubscriptionPaymentPageState extends State<SubscriptionPaymentPage> {
           plan: widget.plan,
           squareApplicationId: widget.squareApplicationId,
           squareLocationId: widget.squareLocationId,
-          functionsBaseUrl: 'https://us-central1-flex-facility-app-b55aa.cloudfunctions.net/api',
+          functionsBaseUrl: _apiBase,
         ),
       ),
     );
@@ -878,8 +955,10 @@ class _SubscriptionPaymentPageState extends State<SubscriptionPaymentPage> {
   @override
   Widget build(BuildContext context) {
     final planPrice = (widget.plan['price'] ?? 0).toDouble();
-    final planName = widget.plan['name'] as String? ?? 'PDF Subscription';
-    final description = widget.plan['description'] as String? ?? 'Monthly access to PDF workouts';
+    final planName =
+        widget.plan['name'] as String? ?? 'PDF Subscription';
+    final description = widget.plan['description'] as String? ??
+        'Monthly access to PDF workouts';
 
     return Scaffold(
       appBar: AppBar(
@@ -899,7 +978,8 @@ class _SubscriptionPaymentPageState extends State<SubscriptionPaymentPage> {
           children: [
             Card(
               elevation: 4,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              shape:
+                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(20),
@@ -916,25 +996,50 @@ class _SubscriptionPaymentPageState extends State<SubscriptionPaymentPage> {
                   children: [
                     const Row(
                       children: [
-                        Icon(Icons.picture_as_pdf, color: Colors.blueAccent, size: 28),
+                        Icon(Icons.picture_as_pdf,
+                            color: Colors.blueAccent, size: 28),
                         SizedBox(width: 12),
                         Text(
                           'Subscription Summary',
-                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blueAccent),
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blueAccent,
+                          ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 16),
-                    Text(planName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text(
+                      planName,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const SizedBox(height: 8),
-                    Text(description, style: TextStyle(fontSize: 14, color: Colors.grey[600])),
+                    Text(
+                      description,
+                      style:
+                          TextStyle(fontSize: 14, color: Colors.grey[600]),
+                    ),
                     const SizedBox(height: 8),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('Monthly Access', style: TextStyle(fontSize: 16, color: Colors.grey)),
-                        Text('\$${planPrice.toStringAsFixed(2)}/month',
-                            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.green)),
+                        const Text(
+                          'Monthly Access',
+                          style:
+                              TextStyle(fontSize: 16, color: Colors.grey),
+                        ),
+                        Text(
+                          '\$${planPrice.toStringAsFixed(2)}/month',
+                          style: const TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green,
+                          ),
+                        ),
                       ],
                     ),
                   ],
@@ -942,11 +1047,15 @@ class _SubscriptionPaymentPageState extends State<SubscriptionPaymentPage> {
               ),
             ),
             const SizedBox(height: 24),
-            const Text('Payment Method', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const Text(
+              'Payment Method',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 16),
             Card(
               elevation: 2,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape:
+                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               child: ListTile(
                 leading: Container(
                   padding: const EdgeInsets.all(8),
@@ -956,16 +1065,22 @@ class _SubscriptionPaymentPageState extends State<SubscriptionPaymentPage> {
                   ),
                   child: const Icon(Icons.credit_card, color: Colors.blue),
                 ),
-                title: const Text('Credit/Debit Card', style: TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: const Text('Secure payment via Square'),
+                title: const Text(
+                  'Credit/Debit Card',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                subtitle: const Text(
+                    'Secure payment via Square (opens in browser)'),
                 trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                 onTap: _isProcessingPayment ? null : _openWebCheckout,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 8),
               ),
             ),
             Card(
               elevation: 2,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape:
+                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               child: ListTile(
                 leading: Container(
                   padding: const EdgeInsets.all(8),
@@ -975,11 +1090,15 @@ class _SubscriptionPaymentPageState extends State<SubscriptionPaymentPage> {
                   ),
                   child: const Icon(Icons.receipt_long, color: Colors.blue),
                 ),
-                title: const Text('Invoice', style: TextStyle(fontWeight: FontWeight.bold)),
+                title: const Text(
+                  'Invoice',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
                 subtitle: const Text('Open Square hosted invoice'),
                 trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                 onTap: _isProcessingPayment ? null : _openInvoicePage,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 8),
               ),
             ),
             if (_errorMessage != null) ...[
@@ -990,13 +1109,20 @@ class _SubscriptionPaymentPageState extends State<SubscriptionPaymentPage> {
                 decoration: BoxDecoration(
                   color: Colors.red.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red.withOpacity(0.3)),
+                  border: Border.all(
+                    color: Colors.red.withOpacity(0.3),
+                  ),
                 ),
                 child: Row(
                   children: [
                     const Icon(Icons.error, color: Colors.red),
                     const SizedBox(width: 8),
-                    Expanded(child: Text(_errorMessage!, style: const TextStyle(color: Colors.red))),
+                    Expanded(
+                      child: Text(
+                        _errorMessage!,
+                        style: const TextStyle(color: Colors.red),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1015,7 +1141,13 @@ class _SubscriptionPaymentPageState extends State<SubscriptionPaymentPage> {
                   children: [
                     CircularProgressIndicator(),
                     SizedBox(width: 16),
-                    Text('Processing Payment...', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    Text(
+                      'Processing Payment...',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ],
                 ),
               )
@@ -1028,11 +1160,16 @@ class _SubscriptionPaymentPageState extends State<SubscriptionPaymentPage> {
                     backgroundColor: Colors.blueAccent,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                   ),
                   child: Text(
                     'Subscribe \$${planPrice.toStringAsFixed(2)}/month',
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ),
@@ -1043,7 +1180,10 @@ class _SubscriptionPaymentPageState extends State<SubscriptionPaymentPage> {
                 children: [
                   Icon(Icons.security, size: 16, color: Colors.grey),
                   SizedBox(width: 4),
-                  Text('Secured by Square', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                  Text(
+                    'Secured by Square',
+                    style: TextStyle(color: Colors.grey, fontSize: 12),
+                  ),
                 ],
               ),
             ),
