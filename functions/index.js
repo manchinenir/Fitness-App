@@ -2,7 +2,7 @@
  * functions/index.js
  * =======================*/
 
-// ----- imports -----
+/* ----- imports ----- */
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
 const sgMail = require("@sendgrid/mail");
@@ -13,7 +13,7 @@ const path = require("path");
 const crypto = require("crypto");
 const axios = require("axios");
 
-// ----- init -----
+/* ----- init ----- */
 admin.initializeApp();
 
 /* =========================
@@ -35,102 +35,147 @@ function getSendGrid() {
   return sgMail;
 }
 
-// Shared "from"
-const MAIL_FROM = {
-  email: "bookings@archengineeringservices.com",
-  name: "Flex Facility",
+const MAIL_FROM = { email: "bookings@archengineeringservices.com", name: "Flex Facility" };
+const REPLY_TO = { email: "admin@archengineeringservices.com", name: "Flex Facility Support" };
+const COMMON_HEADERS = {
+  "List-Unsubscribe":
+    "<mailto:admin@archengineeringservices.com>, <https://archengineeringservices.com/unsubscribe>",
+  "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
 };
+const COMMON_TRACKING = { clickTracking: { enable: false }, openTracking: { enable: false } };
 
-/* =========================
-   Square REST client (no SDK)
-========================= */
-function getSquareConfig() {
-  const token = (functions.config()?.square?.sandbox_token || "").trim();
-  const locationId = (functions.config()?.square?.location_id || "").trim();
-  if (!token) {
-    throw new Error(
-      'Square sandbox token not set. Run:\n' +
-        '  firebase functions:config:set square.sandbox_token="EAAA-..." square.location_id="YOUR_LOCATION_ID"'
-    );
-  }
-  return {
-    // prod: https://connect.squareup.com
-    baseURL: "https://connect.squareupsandbox.com",
-    token,
-    locationId,
-  };
+function sendTransactionalEmail({ to, subject, text, html, fromName }) {
+  const mail = getSendGrid();
+  return mail.send({
+    to,
+    from: { ...MAIL_FROM, name: fromName || MAIL_FROM.name },
+    replyTo: REPLY_TO,
+    subject,
+    text,
+    ...(html ? { html } : {}),
+    headers: COMMON_HEADERS,
+    trackingSettings: COMMON_TRACKING,
+  });
 }
 
-function squareHttp() {
-  const cfg = getSquareConfig();
+/* =========================
+   Helpers
+========================= */
+function safeRefId(ref) {
+  if (!ref) return undefined;
+  const s = String(ref).trim();
+  return s.length <= 40 ? s : s.slice(0, 40);
+}
+function fullName({ firstName, lastName }) {
+  return [firstName, lastName].filter(Boolean).join(" ").trim();
+}
+function buildSquareAddress(addr = {}) {
+  // Expecting fields like: line1, line2, locality (city), adminArea (state),
+  // postalCode, country (ISO 3166-1 alpha-2; e.g., "US")
+  const out = {};
+  if (addr.line1) out.address_line_1 = String(addr.line1);
+  if (addr.line2) out.address_line_2 = String(addr.line2);
+  if (addr.locality) out.locality = String(addr.locality);
+  if (addr.adminArea) out.administrative_district_level_1 = String(addr.adminArea);
+  if (addr.postalCode) out.postal_code = String(addr.postalCode);
+  if (addr.country) out.country = String(addr.country);
+  return Object.keys(out).length ? out : undefined;
+}
+
+/* =========================
+   Square REST client (ENV-AWARE)
+========================= */
+
+function resolveSquareEnv(req) {
+  const hdr = (req?.headers?.["x-square-env"] || "").toString().toLowerCase();
+  if (hdr === "sandbox" || hdr === "production") return hdr;
+  const cfgEnv = (functions.config()?.square?.env || "sandbox").toLowerCase();
+  return cfgEnv === "production" ? "production" : "sandbox";
+}
+
+function getSquareConfig(req) {
+  const env = resolveSquareEnv(req);
+  const cfg = functions.config()?.square || {};
+  const sandboxToken = (cfg.sandbox_token || "").trim();
+  const prodToken = (cfg.prod_token || "").trim();
+
+  const sandboxLocationId = (cfg.sandbox_location_id || cfg.location_id || "").trim();
+  const prodLocationId = (cfg.prod_location_id || cfg.location_id || "").trim();
+
+  const isProd = env === "production";
+  const token = isProd ? prodToken : sandboxToken;
+  const locationId = isProd ? prodLocationId : sandboxLocationId;
+  const baseURL = isProd
+    ? "https://connect.squareup.com"
+    : "https://connect.squareupsandbox.com";
+
+  if (!token) {
+    const hint = isProd ? "prod_token" : "sandbox_token";
+    throw new Error(`Square ${env} token not set. Run:\n  firebase functions:config:set square.${hint}="EAAA-..."`);
+  }
+  if (!locationId) {
+    const hint = isProd ? "prod_location_id" : "sandbox_location_id";
+    throw new Error(`Square ${env} location_id not set. Run:\n  firebase functions:config:set square.${hint}="LXXXX..."`);
+  }
+
+  return { env, isProd, baseURL, token, locationId };
+}
+
+function squareHttp(req) {
+  const cfg = getSquareConfig(req);
   return axios.create({
     baseURL: cfg.baseURL,
     headers: {
       Authorization: `Bearer ${cfg.token}`,
       "Content-Type": "application/json",
       Accept: "application/json",
-      // Optionally pin API version:
-      // "Square-Version": "2024-08-21",
+      "Square-Version": "2024-08-21",
     },
     timeout: 20000,
   });
 }
 
-async function squareCreatePayment({
-  sourceId,
-  amountCents,
-  currency = "USD",
-  idempotencyKey,
-  locationId,
-}) {
-  const cfg = getSquareConfig();
-  const http = squareHttp();
-  const body = {
-    source_id: sourceId,
-    idempotency_key: idempotencyKey,
-    amount_money: { amount: Number(amountCents), currency },
-    location_id: locationId || cfg.locationId,
-  };
-  const { data } = await http.post("/v2/payments", body);
-  return data;
-}
+/* =========================
+   Square API wrappers
+========================= */
 
-/* ---------- helpers for Invoices & Links ---------- */
-
-async function ensureSquareCustomer({ email, given_name, family_name }) {
-  const http = squareHttp();
-
-  // try find existing
+async function ensureSquareCustomer({ req, email, given_name, family_name, referenceId }) {
+  const http = squareHttp(req);
   try {
-    const { data } = await http.post("/v2/customers/search", {
-      query: { filter: { email_address: { exact: email } } },
-      limit: 1,
-    });
-    const c = (data.customers || [])[0];
-    if (c) return c;
-  } catch (_) {
-    // ignore search errors; we'll fallback to create
-  }
-
-  // create
-  const { data } = await http.post("/v2/customers", {
+    if (email) {
+      const { data } = await http.post("/v2/customers/search", {
+        query: { filter: { email_address: { exact: email } } },
+        limit: 1,
+      });
+      const c = (data.customers || [])[0];
+      if (c) return c;
+    }
+  } catch (_) {}
+  const payload = {
     email_address: email,
     given_name,
     family_name,
-  });
+    ...(referenceId ? { reference_id: referenceId } : {}),
+  };
+  const { data } = await http.post("/v2/customers", payload);
   return data.customer;
 }
 
 async function squareCreateOrder({
+  req,
   locationId,
   name,
   amountCents,
   currency = "USD",
+  customerId,
+  referenceId,
 }) {
-  const http = squareHttp();
+  const http = squareHttp(req);
   const { data } = await http.post("/v2/orders", {
     order: {
       location_id: locationId,
+      ...(customerId ? { customer_id: customerId } : {}),
+      ...(referenceId ? { reference_id: referenceId } : {}),
       line_items: [
         {
           name,
@@ -143,14 +188,44 @@ async function squareCreateOrder({
   return data.order;
 }
 
-async function squareCreateInvoice({
+async function squareCreatePayment({
+  req,
+  sourceId,
+  amountCents,
+  currency = "USD",
+  idempotencyKey,
   locationId,
+  verificationToken,
   orderId,
   customerId,
-  title,
-  description,
+  note,
+  referenceId,
+  buyerEmail,
+  billingAddress,
 }) {
-  const http = squareHttp();
+  const cfg = getSquareConfig(req);
+  const http = squareHttp(req);
+  const body = {
+    source_id: sourceId,
+    idempotency_key: idempotencyKey,
+    amount_money: { amount: Number(amountCents), currency },
+    location_id: locationId || cfg.locationId,
+    ...(verificationToken ? { verification_token: verificationToken } : {}),
+    ...(orderId ? { order_id: orderId } : {}),
+    ...(customerId ? { customer_id: customerId } : {}),
+    ...(note ? { note } : {}),
+    ...(referenceId ? { reference_id: referenceId } : {}),
+    ...(buyerEmail ? { buyer_email_address: buyerEmail } : {}),
+    ...(billingAddress ? { billing_address: billingAddress } : {}),
+  };
+  const { data } = await http.post("/v2/payments", body);
+  return data;
+}
+
+/* ---------- helpers for Invoices & Links ---------- */
+
+async function squareCreateInvoice({ req, locationId, orderId, customerId, title, description }) {
+  const http = squareHttp(req);
   const { data } = await http.post("/v2/invoices", {
     invoice: {
       location_id: locationId,
@@ -158,12 +233,7 @@ async function squareCreateInvoice({
       title,
       description,
       primary_recipient: { customer_id: customerId },
-      payment_requests: [
-        {
-          request_type: "BALANCE",
-          // due_date: new Date().toISOString().slice(0, 10), // optional
-        },
-      ],
+      payment_requests: [{ request_type: "BALANCE" }],
     },
     idempotency_key:
       typeof crypto.randomUUID === "function"
@@ -173,8 +243,8 @@ async function squareCreateInvoice({
   return data.invoice;
 }
 
-async function squarePublishInvoice({ invoiceId, version }) {
-  const http = squareHttp();
+async function squarePublishInvoice({ req, invoiceId, version }) {
+  const http = squareHttp(req);
   const idempotency_key =
     typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
@@ -186,13 +256,8 @@ async function squarePublishInvoice({ invoiceId, version }) {
   return data.invoice;
 }
 
-async function squareCreateQuickPayLink({
-  name,
-  amountCents,
-  currency = "USD",
-  locationId,
-}) {
-  const http = squareHttp();
+async function squareCreateQuickPayLink({ req, name, amountCents, currency = "USD", locationId }) {
+  const http = squareHttp(req);
   const idempotency_key =
     typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
@@ -207,14 +272,13 @@ async function squareCreateQuickPayLink({
       payment_note: name,
     },
   });
-  return data.payment_link; // { id, url, long_url, ... }
+  return data.payment_link;
 }
 
 /* =========================
    EMAIL FUNCTIONS (bookings)
 ========================= */
 
-// SEND BOOKING EMAIL ON CREATE
 exports.notifyBookingOnCreate = functions
   .runWith({ memory: "256MB", timeoutSeconds: 60 })
   .firestore.document("trainer_slots/{slotId}")
@@ -227,24 +291,23 @@ exports.notifyBookingOnCreate = functions
     const slotDate = data.date.toDate().toLocaleDateString();
     const trainer = data.trainer_name || "your trainer";
 
-    const mail = getSendGrid();
     await Promise.all(
       bookedEmails.map((email) =>
-        mail
-          .send({
-            to: email,
-            from: { ...MAIL_FROM, name: "Flex Facility Bookings" },
-            subject: `✅ Booking Confirmed – ${trainer}`,
-            text: `Hi there,\n\n🎉 Your session with ${trainer} is confirmed!\n\n📅 Date: ${slotDate}\n⏰ Time: ${slotTime}\n\nPlease arrive 5 minutes early.\n\nThanks,\nFlex Facility Team`,
-          })
-          .catch((err) =>
-            console.error(`❌ Error sending booking (onCreate) to ${email}:`, err)
-          )
+        sendTransactionalEmail({
+          to: email,
+          fromName: "Flex Facility Bookings",
+          subject: `Booking Confirmed – ${trainer}`,
+          text:
+            `Hi,\n\nYour session is confirmed.\n\n` +
+            `Date: ${slotDate}\nTime: ${slotTime}\nTrainer: ${trainer}\n\n` +
+            `Please arrive 5 minutes early.\n\n— Flex Facility Team`,
+        }).catch((err) =>
+          console.error(`Error sending booking (onCreate) to ${email}:`, err)
+        )
       )
     );
   });
 
-// SEND BOOKING/RESCHEDULE/CANCEL ON UPDATE
 exports.handleBookingAndCancellation = functions
   .runWith({ memory: "256MB", timeoutSeconds: 60 })
   .firestore.document("trainer_slots/{slotId}")
@@ -262,52 +325,50 @@ exports.handleBookingAndCancellation = functions
     const slotDate = (after.date || before.date).toDate().toLocaleDateString();
     const trainer = after.trainer_name || before.trainer_name || "your trainer";
 
-    const mail = getSendGrid();
     const tasks = [];
 
-    // Reschedule
-    const isReschedule =
-      before.is_reschedule === true || after.is_reschedule === true;
+    const isReschedule = before.is_reschedule === true || after.is_reschedule === true;
     if (isReschedule && newlyBooked.length === 1 && cancelled.length === 1) {
       const email = newlyBooked[0];
-      await mail.send({
+      await sendTransactionalEmail({
         to: email,
-        from: { ...MAIL_FROM, name: "Flex Facility Bookings" },
-        subject: `🔁 Rescheduled – ${trainer}`,
+        fromName: "Flex Facility Bookings",
+        subject: `Rescheduled – ${trainer}`,
         text:
-          `Hi there,\n\n🔁 Your session with ${trainer} has been rescheduled.\n\n` +
-          `📅 New Date: ${slotDate}\n⏰ New Time: ${slotTime}\n\nPlease arrive 5 minutes early.\n\nThanks,\nFlex Facility Team`,
+          `Hi,\n\nYour session has been rescheduled.\n\n` +
+          `New Date: ${slotDate}\nNew Time: ${slotTime}\nTrainer: ${trainer}\n\n` +
+          `Please arrive 5 minutes early.\n\n— Flex Facility Team`,
       });
       if (after.is_reschedule) {
-        await change.after.ref.update({
-          is_reschedule: admin.firestore.FieldValue.delete(),
-        });
+        await change.after.ref.update({ is_reschedule: admin.firestore.FieldValue.delete() });
       }
       return;
     }
 
     for (const email of newlyBooked) {
       tasks.push(
-        mail.send({
+        sendTransactionalEmail({
           to: email,
-          from: { ...MAIL_FROM, name: "Flex Facility Bookings" },
-          subject: `✅ Booking Confirmed – ${trainer}`,
+          fromName: "Flex Facility Bookings",
+          subject: `Booking Confirmed – ${trainer}`,
           text:
-            `Hi there,\n\n🎉 Your session with ${trainer} is confirmed!\n\n` +
-            `📅 Date: ${slotDate}\n⏰ Time: ${slotTime}\n\nPlease arrive 5 minutes early.\n\nThanks,\nFlex Facility Team`,
+            `Hi,\n\nYour session is confirmed.\n\n` +
+            `Date: ${slotDate}\nTime: ${slotTime}\nTrainer: ${trainer}\n\n` +
+            `Please arrive 5 minutes early.\n\n— Flex Facility Team`,
         })
       );
     }
 
     for (const email of cancelled) {
       tasks.push(
-        mail.send({
+        sendTransactionalEmail({
           to: email,
-          from: { ...MAIL_FROM, name: "Flex Facility Bookings" },
-          subject: `❌ Booking Cancelled – ${trainer}`,
+          fromName: "Flex Facility Bookings",
+          subject: `Booking Cancelled – ${trainer}`,
           text:
-            `Hi there,\n\nYour session with ${trainer} has been cancelled.\n\n` +
-            `📅 Date: ${slotDate}\n⏰ Time: ${slotTime}\n\nIf this was a mistake, you can rebook through the app.\n\nThanks,\nFlex Facility Team`,
+            `Hi,\n\nYour session has been cancelled.\n\n` +
+            `Date: ${slotDate}\nTime: ${slotTime}\nTrainer: ${trainer}\n\n` +
+            `If this was a mistake, you can rebook in the app.\n\n— Flex Facility Team`,
         })
       );
     }
@@ -322,15 +383,17 @@ const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json());
 
-app.get("/health", (_req, res) => {
+app.get("/health", (req, res) => {
   let squareConfigured = false;
+  let env = "sandbox";
   try {
-    const cfg = getSquareConfig();
+    const cfg = getSquareConfig(req);
     squareConfigured = !!cfg.token;
+    env = cfg.env;
   } catch (_) {
     squareConfigured = false;
   }
-  res.json({ ok: true, function: "api", squareConfigured });
+  res.json({ ok: true, function: "api", squareConfigured, env });
 });
 
 app.get("/checkout", (_req, res) => {
@@ -341,20 +404,31 @@ app.get("/checkout", (_req, res) => {
   } else {
     res
       .status(200)
-      .send(
-        "<html><body><h3>Square Checkout</h3><p>templates/checkout.html not found.</p></body></html>"
-      );
+      .send("<html><body><h3>Square Checkout</h3><p>templates/checkout.html not found.</p></body></html>");
   }
 });
 
-// Direct card charge (if you tokenize in a webview)
+/* =========================
+   Direct card/wallet charge
+========================= */
 app.post("/process-payment", async (req, res) => {
   try {
-    const { token, amountCents, currency = "USD", locationId } = req.body;
+    const {
+      token,
+      amountCents,
+      currency = "USD",
+      locationId,
+      verificationToken,   // from verifyBuyer
+
+      // metadata from your web checkout:
+      planName = "Fitness Plan",
+      buyer = {},          // { firstName, lastName, email }
+      billingDetails = {}, // { line1,line2,locality,adminArea,postalCode,country }
+      referenceId,         // may be long, we will safely trim
+    } = req.body || {};
+
     if (!amountCents || !token) {
-      return res
-        .status(400)
-        .json({ ok: false, error: "Missing token or amount" });
+      return res.status(400).json({ ok: false, error: "Missing token or amount" });
     }
 
     const idempotencyKey =
@@ -362,35 +436,104 @@ app.post("/process-payment", async (req, res) => {
         ? crypto.randomUUID()
         : crypto.randomBytes(16).toString("hex");
 
+    const cfg = getSquareConfig(req);
+    const locId = locationId || cfg.locationId;
+    const refId = safeRefId(referenceId);
+    const full = fullName({ firstName: buyer.firstName, lastName: buyer.lastName }) || "Customer";
+
+    // 1) Ensure/attach a customer
+    let customerId;
+    try {
+      if (buyer?.email || buyer?.firstName || buyer?.lastName) {
+        const cust = await ensureSquareCustomer({
+          req,
+          email: buyer.email || undefined,
+          given_name: buyer.firstName || "",
+          family_name: buyer.lastName || "",
+          referenceId: refId,
+        });
+        customerId = cust.id;
+      }
+    } catch (e) {
+      console.warn("ensureSquareCustomer warning:", e?.response?.data || e.message);
+    }
+
+    // 2) Create an order with the plan name
+    let orderId;
+    try {
+      const order = await squareCreateOrder({
+        req,
+        locationId: locId,
+        name: planName || "Training Plan",
+        amountCents: Math.round(Number(amountCents)),
+        currency,
+        customerId,
+        referenceId: refId,
+      });
+      orderId = order.id;
+    } catch (e) {
+      console.warn("squareCreateOrder warning:", e?.response?.data || e.message);
+    }
+
+    // 3) Charge
     const result = await squareCreatePayment({
+      req,
       sourceId: token.id || token,
-      amountCents,
+      amountCents: Math.round(Number(amountCents)),
       currency,
       idempotencyKey,
-      locationId,
+      locationId: locId,
+      verificationToken,
+      orderId,
+      customerId,
+      referenceId: refId,
+      note: `${full} – ${planName}`,
+      buyerEmail: buyer?.email,
+      billingAddress: buildSquareAddress(billingDetails),
     });
 
-    return res.json({ ok: true, paymentId: result.payment?.id, result });
+    // 4) Email receipt/confirmation via SendGrid
+    let emailSent = false;
+    if (buyer?.email) {
+      try {
+        const dollars = (Number(amountCents) / 100).toFixed(2);
+        const text =
+          `Hi ${full},\n\n` +
+          `Your payment for "${planName}" was successful.\n` +
+          `Amount: $${dollars}\n` +
+          (refId ? `Reference: ${refId}\n` : ``) +
+          `\nThank you,\nFlex Facility`;
+        await sendTransactionalEmail({
+          to: buyer.email,
+          fromName: "Flex Facility Billing",
+          subject: `Payment Successful – ${planName}`,
+          text,
+        });
+        emailSent = true;
+      } catch (e) {
+        console.error("SendGrid error:", e?.response?.data || e.message);
+      }
+    }
+
+    return res.json({
+      ok: true,
+      paymentId: result.payment?.id,
+      result,
+      emailSent,
+    });
   } catch (e) {
-    const errMsg = e.response?.data
-      ? JSON.stringify(e.response.data)
-      : e.message || "Payment error";
+    const errMsg = e.response?.data ? JSON.stringify(e.response.data) : e.message || "Payment error";
     console.error("process-payment error:", errMsg);
     return res.status(500).json({ ok: false, error: errMsg });
   }
 });
 
 /* =========================
-   Create & Publish Invoice (returns public_url)
-   Body:
-   {
-     plan: { name, price, sessions, description },
-     customer: { email, given_name, family_name }
-   }
+   Create & Publish Invoice
 ========================= */
 app.post("/create-invoice", async (req, res) => {
   try {
-    const cfg = getSquareConfig();
+    const cfg = getSquareConfig(req);
     const { plan = {}, customer = {} } = req.body || {};
     const name = plan.name || "Fitness Plan";
     const price = Number(plan.price || 0);
@@ -401,40 +544,31 @@ app.post("/create-invoice", async (req, res) => {
     const given_name = customer.given_name || "";
     const family_name = customer.family_name || "";
 
-    // 1) ensure customer
-    const cust = await ensureSquareCustomer({
-      email,
-      given_name,
-      family_name,
-    });
-
-    // 2) create order
+    const cust = await ensureSquareCustomer({ req, email, given_name, family_name });
     const order = await squareCreateOrder({
+      req,
       locationId: cfg.locationId,
       name,
       amountCents,
       currency: "USD",
+      customerId: cust.id
     });
-
-    // 3) create invoice (DRAFT)
     const draft = await squareCreateInvoice({
+      req,
       locationId: cfg.locationId,
       orderId: order.id,
       customerId: cust.id,
       title: name,
       description,
     });
-
-    // 4) publish to get public_url
     const published = await squarePublishInvoice({
+      req,
       invoiceId: draft.id,
-      version: draft.version,
+      version: draft.version
     });
-
     return res.json({ ok: true, invoice: published });
   } catch (e) {
-    const msg =
-      e.response?.data ? JSON.stringify(e.response.data) : e.message || String(e);
+    const msg = e.response?.data ? JSON.stringify(e.response.data) : e.message || String(e);
     console.error("create-invoice error:", msg);
     res.status(500).json({ ok: false, error: msg });
   }
@@ -442,40 +576,36 @@ app.post("/create-invoice", async (req, res) => {
 
 /* =========================
    Create/Send Pay Link
-   Body:
-   {
-     planName: "Semi Private Day Pass",
-     amountCents: 4000,
-     recipientEmail: "amila@example.com",
-     recipientName: "Amila",
-     publicUrl?: "https://square.link/..." // optional: if provided we email this instead of creating a quick link
-   }
 ========================= */
 app.post("/payment-link/email", async (req, res) => {
   try {
-    const cfg = getSquareConfig();
+    // Only used if we need to create a link:
+    const cfg = getSquareConfig(req);
+
     const {
       planName,
-      amountCents,
+      amountCents,            // required if publicUrl not provided
       recipientEmail,
       recipientName = "",
-      publicUrl,
+      publicUrl,              // optional: if provided, we email this directly
     } = req.body || {};
+
     if (!planName || !recipientEmail) {
-      return res
-        .status(400)
-        .json({ ok: false, error: "Missing planName or recipientEmail" });
+      return res.status(400).json({ ok: false, error: "Missing planName or recipientEmail" });
     }
 
-    // Use provided hosted-invoice URL or create a quick pay link
+    // Determine which URL to send
     let url = (publicUrl || "").trim();
     if (!url) {
       if (!amountCents) {
-        return res
-          .status(400)
-          .json({ ok: false, error: "amountCents required when publicUrl is not provided" });
+        return res.status(400).json({
+          ok: false,
+          error: "amountCents required when publicUrl is not provided",
+        });
       }
+      // Create a Square Quick Pay link
       const link = await squareCreateQuickPayLink({
+        req,
         name: planName,
         amountCents: Number(amountCents),
         currency: "USD",
@@ -484,38 +614,46 @@ app.post("/payment-link/email", async (req, res) => {
       url = link.url;
     }
 
-    // Send email
-    const mail = getSendGrid();
     const safeName = recipientName ? ` ${recipientName}` : "";
+
     const html = `
-      <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#111">
-        <h2 style="margin:0 0 12px">Payment link – ${planName}</h2>
+      <div style="font-family:Arial,Helvetica,sans-serif;color:#222;line-height:1.6">
+        <h2 style="color:#1C2D5E;">Complete your payment — ${planName}</h2>
         <p>Hi${safeName},</p>
-        <p>Please use the secure button below to complete your payment for <b>${planName}</b>.</p>
-        <p style="margin:24px 0">
-          <a href="${url}" style="background:#1c2d5e;color:#fff;padding:12px 18px;border-radius:6px;text-decoration:none;display:inline-block">Pay Now</a>
+        <p>Your secure payment link for <b>${planName}</b> is ready.</p>
+        <p>
+          <a href="${url}"
+             style="display:inline-block;padding:10px 16px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px;">
+            Pay Now
+          </a>
         </p>
-        <p>If the button doesn’t work, copy and paste this URL into your browser:</p>
-        <p><a href="${url}">${url}</a></p>
-        <p style="color:#555">Thank you!<br/>Flex Facility</p>
+        ${
+          amountCents
+            ? `<p>Amount: <b>$${(Number(amountCents) / 100).toFixed(2)}</b></p>`
+            : ""
+        }
+        <p>If the button doesn’t work, copy and paste this URL:</p>
+        <p style="word-break:break-all"><a href="${url}">${url}</a></p>
+        <p style="margin-top:20px;color:#555;font-size:14px;">
+          Need help? Email <a href="mailto:${REPLY_TO.email}">${REPLY_TO.email}</a>.
+        </p>
       </div>
     `;
 
-    await mail.send({
+    await sendTransactionalEmail({
       to: recipientEmail,
-      from: { ...MAIL_FROM, name: "Flex Facility Billing" },
+      fromName: "Flex Facility Billing",
       subject: `Payment link – ${planName}`,
       text:
         `Hi${safeName},\n\n` +
-        `Please complete your payment for "${planName}" using this secure link:\n` +
-        `${url}\n\nThanks,\nFlex Facility`,
+        `Please complete your payment for "${planName}" using this secure link:\n${url}\n\n` +
+        `Thank you,\nFlex Facility`,
       html,
     });
 
     return res.json({ ok: true, url });
   } catch (e) {
-    const msg =
-      e.response?.data ? JSON.stringify(e.response.data) : e.message || String(e);
+    const msg = e.response?.data ? JSON.stringify(e.response.data) : e.message || String(e);
     console.error("payment-link/email error:", msg);
     res.status(500).json({ ok: false, error: msg });
   }

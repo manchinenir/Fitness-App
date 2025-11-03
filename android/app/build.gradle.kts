@@ -26,10 +26,10 @@ android {
 
     defaultConfig {
         applicationId = "com.flexfacility.app"
-        minSdk = maxOf(24, flutter.minSdkVersion)
+        minSdk = maxOf(28, flutter.minSdkVersion)
         targetSdk = flutter.targetSdkVersion
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 9
+        versionName = "1.0.8"
     }
 
     compileOptions {

@@ -1,7 +1,7 @@
 name: flex_facility_app
 description: A gym management app for admins and clients.
 publish_to: 'none'
-version: 1.0.0+2
+version: 1.0.0+9
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
@@ -50,7 +50,9 @@ dev_dependencies:
   percent_indicator: ^4.2.2
   flutter_native_splash: ^2.3.5
   square_in_app_payments: ^1.6.0
-  webview_flutter: ^4.7.0
+  webview_flutter: ^4.13.0
+  webview_flutter_android: ^4.10.5
+  webview_flutter_wkwebview: ^3.23.1
   clipboard: ^0.1.3 
 
   

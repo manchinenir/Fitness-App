@@ -128,7 +128,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
         });
       }
     } catch (e) {
-      print('Error loading tab disabled status');
+      print('Error loading tab disabled status: $e');
     }
   }
 
@@ -146,6 +146,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
       }
     });
   }
+
   DateTime _parseEndDate(dynamic endDate) {
     if (endDate is Timestamp) {
       return endDate.toDate().toLocal();
@@ -154,9 +155,10 @@ class _ClientDashboardState extends State<ClientDashboard> {
     } else if (endDate is DateTime) {
       return endDate.toLocal();
     } else {
-      return DateTime.now().add(const Duration(days: 1)); // Default to tomorrow if invalid
+      return DateTime.now().add(const Duration(days: 1));
     }
   }
+
   void _setupProfileImageListener() {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
@@ -186,7 +188,6 @@ class _ClientDashboardState extends State<ClientDashboard> {
     }
   }
 
-  /// NEW: Month Day, Year formatting (e.g., October 13, 2025)
   String _formatMonthDayYear(DateTime dt) {
     const months = [
       'January','February','March','April','May','June',
@@ -209,37 +210,45 @@ class _ClientDashboardState extends State<ClientDashboard> {
       final now = DateTime.now();
       int completed = 0;
       List<Map<String, dynamic>> upcoming = [];
+      
       for (final doc in snapshot.docs) {
         final data = doc.data();
         if (data['date'] is! Timestamp) continue;
+        
         final date = (data['date'] as Timestamp).toDate().toLocal();
         final timeRange = data['time'] as String? ?? '';
+        
+        // Check if this session is completed (in the past)
         if (date.isBefore(now)) {
           completed++;
         } else {
+          // For upcoming sessions, check if they're today or in the future
           upcoming.add({'date': date, 'time': timeRange});
         }
       }
+      
       String? nextInfo;
       if (upcoming.isNotEmpty) {
-        upcoming.sort((a, b) =>
-            (a['date'] as DateTime).compareTo(b['date'] as DateTime));
+        // Sort by date
+        upcoming.sort((a, b) => (a['date'] as DateTime).compareTo(b['date'] as DateTime));
         final next = upcoming.first;
         final dt = next['date'] as DateTime;
 
-        // Use Month Day, Year format
         final dateStr = _formatMonthDayYear(dt);
         nextInfo = '$dateStr – ${next['time']}';
+      } else {
+        nextInfo = 'No upcoming sessions';
       }
+      
       if (mounted) {
         setState(() {
           completedSessions = completed;
-          nextUpcomingSessionTime = nextInfo ?? 'No upcoming session';
+          nextUpcomingSessionTime = nextInfo;
         });
       }
     });
 
-    // Add proper subscription status checking with expiration logic
+    // Subscription listeners
     FirebaseFirestore.instance
         .collection('client_subscriptions')
         .where('userId', isEqualTo: uid)
@@ -292,7 +301,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
         };
       });
     } catch (e) {
-      setState(() => errorMessage = 'Error loading user');
+      setState(() => errorMessage = 'Error loading user: $e');
     } finally {
       setState(() => isLoading = false);
     }
@@ -356,6 +365,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
         body: const Center(child: CircularProgressIndicator()),
       );
     }
+    
     if (errorMessage != null) {
       return Scaffold(
         backgroundColor: theme.scaffoldBackgroundColor,
@@ -370,9 +380,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
                 Text(errorMessage!, textAlign: TextAlign.center),
                 const SizedBox(height: 16),
                 ElevatedButton(
-                  onPressed: () {
-                    _fetchUserProfile();
-                  },
+                  onPressed: _fetchUserProfile,
                   child: const Text('Retry'),
                 ),
               ],
@@ -385,7 +393,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       body: RefreshIndicator(
-        onRefresh: () async => _fetchUserProfile(),
+        onRefresh: _fetchUserProfile,
         child: CustomScrollView(
           slivers: [
             SliverAppBar(
@@ -629,7 +637,6 @@ class _ClientDashboardState extends State<ClientDashboard> {
                                       
                                       DateTime expirationDate;
                                       
-                                      // Parse endDate based on its type
                                       if (endDate is Timestamp) {
                                         expirationDate = endDate.toDate().toLocal();
                                       } else if (endDate is String) {
@@ -637,14 +644,12 @@ class _ClientDashboardState extends State<ClientDashboard> {
                                       } else if (endDate is DateTime) {
                                         expirationDate = endDate.toLocal();
                                       } else {
-                                        // If endDate is invalid, skip this subscription
                                         continue;
                                       }
                                       
                                       final isExpired = expirationDate.isBefore(now);
                                       final isCancelled = status == 'cancelled';
                                       
-                                      // Only count active, non-expired, non-cancelled subscriptions
                                       if (isActive && !isCancelled && !isExpired) {
                                         subCount++;
                                       }
@@ -800,6 +805,10 @@ class _ClientDashboardState extends State<ClientDashboard> {
                   );
                 },
               ),
+            ),
+            // Add an empty sliver at the end to prevent white space issues
+            const SliverToBoxAdapter(
+              child: SizedBox(height: 20),
             ),
           ],
         ),

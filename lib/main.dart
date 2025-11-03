@@ -3,7 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart'; // NEW: FCM package
-
+import 'package:webview_flutter/webview_flutter.dart';
 import 'auth/login_page.dart';
 import 'auth/sign_up_page.dart';
 import 'auth/reset_password_page.dart';
@@ -11,8 +11,9 @@ import 'auth/reset_password_page.dart';
 import 'screens/splash_screen.dart';
 import 'screens/client_dashboard.dart' as client;
 import 'screens/client_workout_screen.dart';
-
-void main() async {
+import 'screens/checkout_webview.dart';
+void main() 
+async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
 
@@ -48,18 +49,14 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   print('Received background notification: ${message.notification?.title}');
 }
-
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Flex Facility App',
-      theme: ThemeData(
-        primarySwatch: Colors.indigo,
-      ),
+      theme: ThemeData(primarySwatch: Colors.indigo),
       home: const SplashScreen(),
       routes: {
         '/login': (context) => const LoginPage(),
@@ -67,6 +64,14 @@ class MyApp extends StatelessWidget {
         '/reset-password': (context) => const ResetPasswordPage(),
         '/client': (context) => const client.ClientDashboard(),
         '/clientWorkout': (context) => const ClientWorkoutScreen(),
+
+        // Web checkout generic route (if you want to pushNamed)
+        '/checkout': (context) {
+          final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+          final url = args?['url'] as String? ??
+              'https://us-central1-flex-facility-app-b55aa.cloudfunctions.net/api/checkout?amountCents=2500';
+          return CheckoutWebView(url: url);
+        },
       },
     );
   }
