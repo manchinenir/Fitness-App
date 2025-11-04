@@ -1,0 +1,5 @@
+storeFile=upload-keystore.p12
+storePassword=GPhema@69
+keyAlias=upload
+keyPassword=GPhema@69
+storeType=pkcs12
