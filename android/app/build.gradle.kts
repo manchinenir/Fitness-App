@@ -1,15 +1,16 @@
 import java.util.Properties
 import java.io.FileInputStream
-import org.gradle.api.GradleException
 
-// Load keystore props
 val keystoreProps = Properties()
 val propsFile = rootProject.file("key.properties")
-if (!propsFile.exists()) {
-    throw GradleException("key.properties not found at ${propsFile.absolutePath}")
+val hasKeystore = if (propsFile.exists()) {
+    keystoreProps.load(FileInputStream(propsFile))
+    true
+} else {
+    println("⚠ key.properties not found at ${propsFile.absolutePath}. " +
+            "Release signing will fall back to debug / unsigned.")
+    false
 }
-keystoreProps.load(FileInputStream(propsFile))
-
 
 plugins {
     id("com.android.application")
@@ -17,8 +18,9 @@ plugins {
     id("com.google.gms.google-services")
     id("dev.flutter.flutter-gradle-plugin")
 }
+
 android {
-    namespace = "com.example.flex_facility_app"   // <- keep or set your package namespace
+    namespace = "com.example.flex_facility_app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = "27.0.12077973"
 
@@ -37,17 +39,22 @@ android {
     kotlinOptions { jvmTarget = "11" }
 
     signingConfigs {
-        create("release") {
-            val path = keystoreProps["storeFile"] as String
-            storeFile = file(path)
-            storePassword = keystoreProps["storePassword"] as String
-            keyAlias = keystoreProps["keyAlias"] as String
-            keyPassword = keystoreProps["keyPassword"] as String
+        if (hasKeystore) {
+            create("release") {
+                val path = keystoreProps["storeFile"] as String
+                storeFile = file(path)
+                storePassword = keystoreProps["storePassword"] as String
+                keyAlias = keystoreProps["keyAlias"] as String
+                keyPassword = keystoreProps["keyPassword"] as String
+            }
         }
     }
+
     buildTypes {
         getByName("release") {
-            signingConfig = signingConfigs.getByName("release")   // ← critical
+            if (hasKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -57,8 +64,6 @@ android {
         }
     }
 }
- 
-
 
 flutter {
     source = "../.."
