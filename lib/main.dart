@@ -2,72 +2,86 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_messaging/firebase_messaging.dart'; // NEW: FCM package
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+
 import 'auth/login_page.dart';
 import 'auth/sign_up_page.dart';
 import 'auth/reset_password_page.dart';
 
 import 'screens/splash_screen.dart';
 import 'screens/client_dashboard.dart' as client;
+import 'screens/admin_dashboard.dart' as admin;
 import 'screens/client_workout_screen.dart';
+import 'screens/admin_workout_screen.dart';
 import 'screens/checkout_webview.dart';
-void main() 
-async {
+
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
 
-  // Initialize Firebase Messaging
-  FirebaseMessaging messaging = FirebaseMessaging.instance;
+  // 🔔 Optional: FCM setup (you already had this)
+  try {
+    FirebaseMessaging messaging = FirebaseMessaging.instance;
+    NotificationSettings settings = await messaging.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+    print('User granted permission: ${settings.authorizationStatus}');
 
-  // Request permission for notifications
-  NotificationSettings settings = await messaging.requestPermission(
-    alert: true,
-    badge: true,
-    sound: true,
-  );
-  print('User granted permission: ${settings.authorizationStatus}');
+    String? token = await messaging.getToken();
+    print('FCM Token: $token');
 
-  // Get and print the FCM token
-  String? token = await messaging.getToken();
-  print('FCM Token: $token');
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      print('Received foreground notification: ${message.notification?.title}');
+    });
 
-  // Handle foreground messages
-  FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-    print('Received foreground notification: ${message.notification?.title}');
-  });
-
-  // Handle background messages
-  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  } catch (e) {
+    print('FCM init error: $e');
+  }
 
   runApp(const MyApp());
 }
 
-// Background message handler
-@pragma('vm:entry-point') // Required on Flutter >=3
+@pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   print('Received background notification: ${message.notification?.title}');
 }
+
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Flex Facility App',
       theme: ThemeData(primarySwatch: Colors.indigo),
-      home: const SplashScreen(),
+      home: const SplashScreen(), // or const RootPage() if you want auto-login
       routes: {
         '/login': (context) => const LoginPage(),
         '/signup': (context) => const SignupPage(),
         '/reset-password': (context) => const ResetPasswordPage(),
+
+        // Client
         '/client': (context) => const client.ClientDashboard(),
         '/clientWorkout': (context) => const ClientWorkoutScreen(),
 
-        // Web checkout generic route (if you want to pushNamed)
+        // Admin
+        '/admin': (context) {
+          final args = ModalRoute.of(context)!.settings.arguments;
+          final userName =
+              (args is String && args.isNotEmpty) ? args : 'Admin';
+          return admin.AdminDashboard(userName: userName);
+        },
+        '/adminWorkoutMulti': (context) => const AdminWorkoutScreen(),
+
+        // Checkout WebView
         '/checkout': (context) {
-          final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+          final args =
+              ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
           final url = args?['url'] as String? ??
               'https://us-central1-flex-facility-app-b55aa.cloudfunctions.net/api/checkout?amountCents=2500';
           return CheckoutWebView(url: url);
@@ -77,6 +91,7 @@ class MyApp extends StatelessWidget {
   }
 }
 
+/// Optional: auto-redirect based on logged-in user role
 class RootPage extends StatelessWidget {
   const RootPage({super.key});
 
@@ -103,13 +118,16 @@ class RootPage extends StatelessWidget {
               }
 
               if (userSnapshot.hasData && userSnapshot.data!.exists) {
-                final data = userSnapshot.data!.data() as Map<String, dynamic>?;
-                final role = data?['role'] ?? 'client';
+                final data =
+                    userSnapshot.data!.data() as Map<String, dynamic>? ?? {};
+                final role = data['role'] ?? 'client';
+                final email = data['email'] ?? '';
+                final userName = email.toString().split('@').first;
 
-                if (role == 'client') {
-                  return const client.ClientDashboard();
+                if (role == 'admin') {
+                  return admin.AdminDashboard(userName: userName);
                 } else {
-                  return const LoginPage(); // Only clients allowed
+                  return const client.ClientDashboard();
                 }
               } else {
                 return const LoginPage();

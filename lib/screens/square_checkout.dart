@@ -3,8 +3,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import 'invoice_review_page.dart';
-
 /// (Optional) old in-app WebView launcher, now unused if you only use external browser
 class SquareWebCheckout extends StatefulWidget {
   const SquareWebCheckout({
@@ -104,8 +102,51 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
   bool _isProcessingPayment = false;
   String? _errorMessage;
 
-  static const String _apiBase =
-      'https://us-central1-flex-facility-app-b55aa.cloudfunctions.net/api';
+  String _buildCheckoutUrl({
+    required int amountCents,
+    required String planName,
+    String? firstName,
+    String? lastName,
+    String? email,
+    String? referenceId,
+  }) {
+    const base =
+        'https://us-central1-flex-facility-app-b55aa.cloudfunctions.net/api';
+
+    final user = FirebaseAuth.instance.currentUser;
+    final uid = user?.uid ?? '';
+
+    final sessions = (widget.plan['sessions'] as int?) ?? 0;
+    final price = (widget.plan['price'] ?? 0).toDouble();
+    final category = (widget.plan['category'] as String?) ?? '';
+    final description = (widget.plan['description'] as String?) ?? '';
+    final planId = (widget.plan['docId'] ?? '').toString();
+
+    final params = {
+      'amountCents': amountCents.toString(),
+      'appId': widget.squareApplicationId,
+      'locationId': widget.squareLocationId,
+      'env': 'production',
+      'apiUrl': '$base/process-payment',
+      'planName': planName,
+      'userId': uid,
+      'planId': planId,
+      'sessions': sessions.toString(),
+      'priceDollars': price.toStringAsFixed(2),
+      'planCategory': category,
+      'planDescription': description,
+      if (firstName != null && firstName.isNotEmpty) 'firstName': firstName,
+      if (lastName != null && lastName.isNotEmpty) 'lastName': lastName,
+      if (email != null && email.isNotEmpty) 'email': email,
+      if (referenceId != null && referenceId.isNotEmpty) 'ref': referenceId,
+    };
+
+    final qp = params.entries
+        .map((e) =>
+            '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}')
+        .join('&');
+    return '$base/checkout?$qp';
+  }
 
   Future<void> _openWebCheckout() async {
     setState(() {
@@ -161,80 +202,13 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
       if (!mounted) return;
       setState(() => _isProcessingPayment = false);
 
-      // We do not pop with a result here – backend writes client_purchases.
-      // When user comes back to app, streams in ClientPlansScreen/Dashboard
-      // will see the new active plan automatically.
+      // Backend writes client_purchases; UI updates via streams.
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _errorMessage = 'Error starting checkout';
         _isProcessingPayment = false;
       });
-    }
-  }
-
-  String _buildCheckoutUrl({
-    required int amountCents,
-    required String planName,
-    String? firstName,
-    String? lastName,
-    String? email,
-    String? referenceId,
-  }) {
-    const base =
-        'https://us-central1-flex-facility-app-b55aa.cloudfunctions.net/api';
-
-    final user = FirebaseAuth.instance.currentUser;
-    final uid = user?.uid ?? '';
-
-    final sessions = (widget.plan['sessions'] as int?) ?? 0;
-    final price = (widget.plan['price'] ?? 0).toDouble();
-    final category = (widget.plan['category'] as String?) ?? '';
-    final description = (widget.plan['description'] as String?) ?? '';
-    final planId = (widget.plan['docId'] ?? '').toString();
-
-    final params = {
-      'amountCents': amountCents.toString(),
-      'appId': widget.squareApplicationId,
-      'locationId': widget.squareLocationId,
-      'env': 'production',
-      'apiUrl': '$base/process-payment',
-      'planName': planName,
-      'userId': uid,
-      'planId': planId,
-      'sessions': sessions.toString(),
-      'priceDollars': price.toStringAsFixed(2),
-      'planCategory': category,
-      'planDescription': description,
-      if (firstName != null && firstName.isNotEmpty) 'firstName': firstName,
-      if (lastName != null && lastName.isNotEmpty) 'lastName': lastName,
-      if (email != null && email.isNotEmpty) 'email': email,
-      if (referenceId != null && referenceId.isNotEmpty) 'ref': referenceId,
-    };
-
-    final qp = params.entries
-        .map((e) =>
-            '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}')
-        .join('&');
-    return '$base/checkout?$qp';
-  }
-
-  Future<void> _openInvoicePage() async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => InvoiceReviewPage(
-          plan: widget.plan,
-          squareApplicationId: widget.squareApplicationId,
-          squareLocationId: widget.squareLocationId,
-          functionsBaseUrl: _apiBase,
-        ),
-      ),
-    );
-
-    if (!mounted) return;
-    if (result == true) {
-      Navigator.of(context).pop(true);
     }
   }
 
@@ -336,28 +310,6 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
                 subtitle: const Text('Secure payment via Square'),
                 trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                 onTap: _isProcessingPayment ? null : _openWebCheckout,
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              ),
-            ),
-            Card(
-              elevation: 2,
-              shape:
-                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              child: ListTile(
-                leading: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                      color: Colors.blue.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8)),
-                  child:
-                      const Icon(Icons.receipt_long, color: Colors.blue),
-                ),
-                title: const Text('Invoice',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: const Text('Open Square hosted invoice'),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                onTap: _isProcessingPayment ? null : _openInvoicePage,
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               ),

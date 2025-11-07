@@ -44,8 +44,3 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 node_modules
-# Local config / secrets
-local.properties
-key.properties
-*.jks
-*.keystore

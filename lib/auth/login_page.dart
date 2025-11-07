@@ -19,7 +19,6 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController passwordController = TextEditingController();
 
   final _formKey = GlobalKey<FormState>();
-  bool isLogin = true;
   bool isLoading = false;
   bool isSendingResetEmail = false;
   bool isVerifyingEmail = false;
@@ -61,35 +60,21 @@ class _LoginPageState extends State<LoginPage> {
     if (isDebugMode) return true;
 
     const apiKey = 'YOUR_API_KEY';
-    final url = Uri.parse('https://emailvalidation.abstractapi.com/v1/?api_key=$apiKey&email=$email');
+    final url = Uri.parse(
+        'https://emailvalidation.abstractapi.com/v1/?api_key=$apiKey&email=$email');
 
     try {
       final response = await http.get(url);
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final isValid = data['is_valid_format']['value'] ?? true;
-        final isDisposable = data['is_disposable_email']['value'] ?? false;
+        final isDisposable =
+            data['is_disposable_email']['value'] ?? false;
         return isValid && !isDisposable;
       }
       return _isValidEmail(email);
     } catch (e) {
       return _isValidEmail(email);
-    }
-  }
-
-  Future<bool> _isEmailAlreadyRegistered(String email) async {
-    try {
-      final methods = await _auth.fetchSignInMethodsForEmail(email);
-      if (methods.isNotEmpty) return true;
-
-      final query = await _firestore.collection('users')
-          .where('email', isEqualTo: email)
-          .limit(1)
-          .get();
-
-      return query.docs.isNotEmpty;
-    } catch (e) {
-      return false;
     }
   }
 
@@ -130,9 +115,13 @@ class _LoginPageState extends State<LoginPage> {
     });
 
     try {
-      UserCredential userCredential = await _auth.signInWithEmailAndPassword(
-        email: emailController.text.trim(),
-        password: passwordController.text.trim(),
+      final email = emailController.text.trim();
+      final password = passwordController.text.trim();
+
+      UserCredential userCredential =
+          await _auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
       );
 
       if (!userCredential.user!.emailVerified) {
@@ -140,19 +129,29 @@ class _LoginPageState extends State<LoginPage> {
         throw Exception("Email not verified. Please check your inbox.");
       }
 
-      final userDoc = await _firestore.collection('users').doc(userCredential.user!.uid).get();
-      if (!userDoc.exists) throw Exception("User record not found");
-      
-      // Add this check for account activation status
-      final isActive = userDoc['isActive'] ?? true;
+      final userDoc = await _firestore
+          .collection('users')
+          .doc(userCredential.user!.uid)
+          .get();
+
+      if (!userDoc.exists) {
+        await _auth.signOut();
+        throw Exception("User record not found");
+      }
+
+      final data = userDoc.data() as Map<String, dynamic>? ?? {};
+
+      final isActive = data['isActive'] ?? true;
       if (!isActive) {
         await _auth.signOut();
         throw Exception("Your account has been deactivated. Please contact support.");
       }
 
-      final role = userDoc['role'] ?? 'client';
-      _navigateBasedOnRole(role);
+      final role = data['role'] ?? 'client';
+      final emailFromDoc = data['email'] ?? '';
+      final userName = emailFromDoc.toString().split('@').first;
 
+      _navigateBasedOnRole(role, userName);
     } catch (e) {
       final msg = e.toString();
       if (e is FirebaseAuthException) {
@@ -162,7 +161,8 @@ class _LoginPageState extends State<LoginPage> {
       } else if (msg.toLowerCase().contains('email not verified')) {
         setState(() => errorMessage = 'Please verify your email to continue.');
       } else if (msg.toLowerCase().contains('deactivated')) {
-        setState(() => errorMessage = 'Your account has been deactivated. Please contact support.');
+        setState(() => errorMessage =
+            'Your account has been deactivated. Please contact support.');
       } else {
         setState(() => errorMessage = 'Something went wrong. Please try again.');
       }
@@ -171,9 +171,15 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  void _navigateBasedOnRole(String role) {
+  void _navigateBasedOnRole(String role, String userName) {
     if (role == 'client') {
       Navigator.pushReplacementNamed(context, '/client');
+    } else if (role == 'admin') {
+      Navigator.pushReplacementNamed(
+        context,
+        '/admin',
+        arguments: userName,
+      );
     } else {
       setState(() {
         errorMessage = 'Access denied.';
@@ -265,7 +271,9 @@ class _LoginPageState extends State<LoginPage> {
         content: Text(message),
         backgroundColor: Colors.red[800],
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
         margin: const EdgeInsets.all(10),
       ),
     );
@@ -277,7 +285,9 @@ class _LoginPageState extends State<LoginPage> {
         content: Text(message),
         backgroundColor: Colors.green[800],
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
         margin: const EdgeInsets.all(10),
       ),
     );
@@ -298,18 +308,17 @@ class _LoginPageState extends State<LoginPage> {
               Column(
                 children: [
                   Container(
-  width: 150,
-  height: 150,
-  decoration: BoxDecoration(
-    shape: BoxShape.circle,
-    color: Colors.black,
-    image: DecorationImage(
-      image: AssetImage('assets/images/flex_login/logo.png'),
-      fit: BoxFit.cover,
-    ),
-  ),
-),
-
+                    width: 150,
+                    height: 150,
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.black,
+                      image: DecorationImage(
+                        image: AssetImage('assets/images/flex_login/logo.png'),
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 16),
                   Text(
                     'Log in to your account',
@@ -328,17 +337,25 @@ class _LoginPageState extends State<LoginPage> {
                         labelText: 'Email',
                         labelStyle: TextStyle(color: Colors.grey[700]),
                         prefixIcon: Icon(Icons.email_outlined, color: navyBlue),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
                           borderSide: BorderSide(color: navyBlue, width: 2),
                         ),
                       ),
                       validator: (value) {
-                        if (value == null || value.isEmpty) return 'Please enter an email';
+                        if (value == null || value.isEmpty) {
+                          return 'Please enter an email';
+                        }
                         final domain = value.split('@').last.toLowerCase();
-                        if (!_emailRegex.hasMatch(value)) return 'Invalid email format';
-                        if (_disposableDomains.contains(domain)) return 'Disposable emails not allowed';
+                        if (!_emailRegex.hasMatch(value)) {
+                          return 'Invalid email format';
+                        }
+                        if (_disposableDomains.contains(domain)) {
+                          return 'Disposable emails not allowed';
+                        }
                         return null;
                       },
                     ),
@@ -351,18 +368,31 @@ class _LoginPageState extends State<LoginPage> {
                         labelStyle: TextStyle(color: Colors.grey[700]),
                         prefixIcon: Icon(Icons.lock_outline, color: navyBlue),
                         suffixIcon: IconButton(
-                          icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility, color: navyBlue),
-                          onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                          icon: Icon(
+                            _obscurePassword
+                                ? Icons.visibility_off
+                                : Icons.visibility,
+                            color: navyBlue,
+                          ),
+                          onPressed: () {
+                            setState(() => _obscurePassword = !_obscurePassword);
+                          },
                         ),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
                           borderSide: BorderSide(color: navyBlue, width: 2),
                         ),
                       ),
                       validator: (value) {
-                        if (value == null || value.isEmpty) return 'Enter your password';
-                        if (value.length < 6) return 'Password too short';
+                        if (value == null || value.isEmpty) {
+                          return 'Enter your password';
+                        }
+                        if (value.length < 6) {
+                          return 'Password too short';
+                        }
                         return null;
                       },
                     ),
@@ -370,10 +400,21 @@ class _LoginPageState extends State<LoginPage> {
                     Align(
                       alignment: Alignment.centerRight,
                       child: TextButton(
-                        onPressed: isSendingResetEmail ? null : _resetPassword,
+                        onPressed:
+                            isSendingResetEmail ? null : _resetPassword,
                         child: isSendingResetEmail
-                            ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: navyBlue))
-                            : Text('Forgot Password?', style: TextStyle(color: navyBlue)),
+                            ? SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: navyBlue,
+                                ),
+                              )
+                            : Text(
+                                'Forgot Password?',
+                                style: TextStyle(color: navyBlue),
+                              ),
                       ),
                     ),
                     const SizedBox(height: 24),
@@ -381,24 +422,51 @@ class _LoginPageState extends State<LoginPage> {
                       width: double.infinity,
                       height: 50,
                       child: ElevatedButton(
-                        onPressed: isLoading ? null : _handleAuthentication,
+                        onPressed:
+                            isLoading ? null : _handleAuthentication,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: navyBlue,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
                         ),
                         child: isLoading
-                            ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                            : const Text('Log in', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                            ? const SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text(
+                                'Log in',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                       ),
                     ),
                     const SizedBox(height: 24),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Text("Don't have an account?", style: TextStyle(color: Colors.grey[700])),
+                        Text(
+                          "Don't have an account?",
+                          style: TextStyle(color: Colors.grey[700]),
+                        ),
                         TextButton(
-                          onPressed: () => Navigator.pushNamed(context, '/signup'),
-                          child: Text('Sign Up', style: TextStyle(fontWeight: FontWeight.bold, color: navyBlue)),
+                          onPressed: () =>
+                              Navigator.pushNamed(context, '/signup'),
+                          child: Text(
+                            'Sign Up',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: navyBlue,
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -414,9 +482,16 @@ class _LoginPageState extends State<LoginPage> {
                           ),
                           child: Row(
                             children: [
-                              Icon(Icons.error_outline, color: Colors.red[800]),
+                              Icon(Icons.error_outline,
+                                  color: Colors.red[800]),
                               const SizedBox(width: 8),
-                              Expanded(child: Text(errorMessage, style: TextStyle(color: Colors.red[800]))),
+                              Expanded(
+                                child: Text(
+                                  errorMessage,
+                                  style:
+                                      TextStyle(color: Colors.red[800]),
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -429,13 +504,21 @@ class _LoginPageState extends State<LoginPage> {
                           decoration: BoxDecoration(
                             color: Colors.green[50],
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.green[200]!),
+                            border:
+                                Border.all(color: Colors.green[200]!),
                           ),
                           child: Row(
                             children: [
-                              Icon(Icons.check_circle_outline, color: Colors.green[800]),
+                              Icon(Icons.check_circle_outline,
+                                  color: Colors.green[800]),
                               const SizedBox(width: 8),
-                              Expanded(child: Text(successMessage, style: TextStyle(color: Colors.green[800]))),
+                              Expanded(
+                                child: Text(
+                                  successMessage,
+                                  style: TextStyle(
+                                      color: Colors.green[800]),
+                                ),
+                              ),
                             ],
                           ),
                         ),

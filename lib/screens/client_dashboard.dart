@@ -11,7 +11,7 @@ import 'package:image_picker/image_picker.dart';
 import 'client_book_slot.dart';
 import 'client_plans_screen.dart';
 import 'schedule_screen.dart';
-import 'post_announcement.dart';
+import 'post_announcement_client.dart';
 import 'profileScreen.dart';
 
 class DashboardItem {

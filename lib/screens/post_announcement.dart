@@ -1,2179 +1,537 @@
+import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:share_plus/share_plus.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:intl/intl.dart';
-import 'package:clipboard/clipboard.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:crypto/crypto.dart';
+import 'dart:convert';
+import 'package:share_plus/share_plus.dart';
+import 'package:flutter/services.dart';
 
 class PostAnnouncementScreen extends StatefulWidget {
-  const PostAnnouncementScreen({super.key});
+  final Map<String, dynamic>? editData;
+  final String? editDocId;
+
+  const PostAnnouncementScreen({
+    super.key,
+    this.editData,
+    this.editDocId,
+  });
 
   @override
   State<PostAnnouncementScreen> createState() => _PostAnnouncementScreenState();
 }
 
-class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
-  final Set<String> _expandedAnnouncements = {};
-  List<String> userBookmarks = [];
-  String searchQuery = '';
-  List<String> selectedCategories = [];
-  Set<String> readAnnouncements = {};
-  bool showUnreadOnly = false;
-  int _selectedTab = 0; // 0: All, 1: Promotions, 2: Referrals
-  DateTime? userSignupDate;
-  bool showHowItWorks = false;
-  bool showMyReferrals = false;
-  // New state variables for referral system
-  String? userReferralCode;
-  int referralCount = 0;
-  int monthsEarned = 0;
-  List<Map<String, dynamic>> successfulReferrals = [];
-  bool isLoadingReferralData = true;
+class _PostAnnouncementScreenState extends State<PostAnnouncementScreen>
+    with SingleTickerProviderStateMixin {
+  final TextEditingController _titleController = TextEditingController();
+  final TextEditingController _messageController = TextEditingController();
+  final TextEditingController _trainerNameController = TextEditingController();
 
+  String _selectedCategory = 'General';
+  String _selectedAudience = 'All Users';
+  File? _selectedImage;
+  File? _selectedPDF;
+  bool _isLoading = false;
+  List<String> _selectedClientIds = [];
+  List<Map<String, dynamic>> _clients = [];
+  bool _isLoadingClients = false;
 
-  Future<void> _fetchUserData() async {
-    try {
-      final uid = FirebaseAuth.instance.currentUser!.uid;
-      final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
-      
-      if (userDoc.exists) {
-        final userData = userDoc.data()!;
-        setState(() {
-          userBookmarks = List<String>.from(userData['bookmarks'] ?? []);
-          readAnnouncements = Set<String>.from(userData['readAnnouncements'] ?? []);
-          
-          // Get user signup date
-          if (userData['created_at'] != null) {
-            userSignupDate = (userData['created_at'] as Timestamp).toDate();
-          }
-        });
-      }
-    } catch (e) {
-      print('Error fetching user data: $e');
-    }
-  }
+  final List<String> _categories = ['General', 'Birthday', 'Event', 'Important'];
+  final List<String> _audiences = ['All Users', 'Specific Clients'];
 
-  Future<void> _markAsRead(String announcementId) async {
-    final uid = FirebaseAuth.instance.currentUser!.uid;
-    final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
-
-    setState(() {
-      readAnnouncements.add(announcementId);
-    });
-
-    try {
-      await userRef.set({
-        'readAnnouncements': FieldValue.arrayUnion([announcementId])
-      }, SetOptions(merge: true));
-    } catch (e) {
-      print('Error marking as read: $e');
-    }
-  }
-
-  Future<void> _addComment(String announcementId, String comment) async {
-    try {
-      final uid = FirebaseAuth.instance.currentUser!.uid;
-      final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
-      final username = userDoc.exists ? (userDoc.data()?['name'] ?? 'User') : 'User';
-
-      await FirebaseFirestore.instance.collection('announcements').doc(announcementId).update({
-        'comments': FieldValue.arrayUnion([
-          {
-            'userId': uid,
-            'username': username,
-            'text': comment,
-            'timestamp': Timestamp.now(),
-          }
-        ])
-      });
-    } catch (e) {
-      print('Error adding comment: $e');
-    }
-  }
-
-  Future<void> _toggleReaction(String announcementId, String? selectedEmoji) async {
-    try {
-      final uid = FirebaseAuth.instance.currentUser!.uid;
-      final docRef = FirebaseFirestore.instance.collection('announcements').doc(announcementId);
-      final docSnap = await docRef.get();
-
-      Map<String, dynamic> reactions = {};
-      final rawReactions = docSnap.data()?['reactions'];
-      if (rawReactions != null && rawReactions is Map) {
-        reactions = Map<String, dynamic>.from(rawReactions);
-      }
-
-      if (selectedEmoji == null || reactions[uid] == selectedEmoji) {
-        reactions.remove(uid);
-      } else {
-        reactions[uid] = selectedEmoji;
-      }
-
-      await docRef.update({'reactions': reactions});
-    } catch (e) {
-      print('Error toggling reaction: $e');
-    }
-  }
-
-  Future<void> _toggleBookmark(String announcementId) async {
-    try {
-      final uid = FirebaseAuth.instance.currentUser!.uid;
-      final userDocRef = FirebaseFirestore.instance.collection('users').doc(uid);
-      final userDoc = await userDocRef.get();
-
-      List<dynamic> bookmarks = userDoc.data()?['bookmarks'] ?? [];
-
-      if (bookmarks.contains(announcementId)) {
-        bookmarks.remove(announcementId);
-      } else {
-        bookmarks.add(announcementId);
-      }
-
-      await userDocRef.update({'bookmarks': bookmarks});
-      await _fetchUserData();
-    } catch (e) {
-      print('Error toggling bookmark: $e');
-    }
-  }
-
-  Future<void> _shareReferralOld(String referralCode) async {
-    final String message = "Join Fitness Hub! 💪\n"
-      "Use my referral code: $referralCode\n"
-      "New members get a special discount, and I'll earn a free month too! 🎉\n\n"
-      "Download the app here: https://play.google.com/store/apps/details?id=com.yourfitnessapp&referrer=referral_code%3D$referralCode";
-    final String subject = "Fitness App Referral";
-    await Share.share(message, subject: subject);
-  }
-
-  // Function to handle promotion link
-  Future<void> _openPromotionLink(String? link) async {
-    if (link != null && link.isNotEmpty) {
-      try {
-        await launchUrl(Uri.parse(link), mode: LaunchMode.inAppWebView);
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open link: $e')),
-        );
-      }
-    }
-  }
+  String _trainerEmail = '';
+  late TabController _tabController;
 
   @override
   void initState() {
     super.initState();
-    _fetchUserData();
-    _fetchReferralData(); // New method to fetch referral data
+    _fetchTrainerInfo();
+    _tabController = TabController(length: 3, vsync: this);
+    _loadClients();
 
+    if (widget.editData != null && widget.editDocId != null) {
+      _loadForEditing(widget.editData!, widget.editDocId!);
+    }
   }
-   // New method to fetch referral data
-  Future<void> _fetchReferralData() async {
-  try {
-    final uid = FirebaseAuth.instance.currentUser!.uid;
-    
-    // Get user's referral code and referral data
-    final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
-      if (userDoc.exists) {
-        final userData = userDoc.data()!;
-        setState(() {
-          userReferralCode = userData['referralCode'] ?? _generateReferralCode(uid);
-          
-          // Get referral count from user document
-          referralCount = userData['referralCount'] ?? 0;
-          
-          // Get referredBy information if available
-          final referredBy = userData['referredBy'];
-          if (referredBy != null) {
-            // You could fetch the referrer's name here if needed
-          }
-        });
-      }
-      
-      // Get successful referrals
-      final referralsQuery = await FirebaseFirestore.instance
-          .collection('referrals')
-          .where('referrerId', isEqualTo: uid)
-          .where('status', isEqualTo: 'completed')
-          .orderBy('joinedAt', descending: true)
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    _titleController.dispose();
+    _messageController.dispose();
+    _trainerNameController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadClients() async {
+    setState(() => _isLoadingClients = true);
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .where('role', isEqualTo: 'client')
           .get();
       
-      // Also get the friends' names from the users collection
-      List<Map<String, dynamic>> referralsWithNames = [];
-      
-      for (var doc in referralsQuery.docs) {
-        final data = doc.data();
-        final referredUserId = data['referredUserId'];
-        
-        // Get the referred user's name
-        if (referredUserId != null) {
-          final referredUserDoc = await FirebaseFirestore.instance
-              .collection('users')
-              .doc(referredUserId)
-              .get();
-              
-          if (referredUserDoc.exists) {
-            final referredUserName = referredUserDoc.data()?['name'] ?? 'Friend';
-            referralsWithNames.add({
-              'friendName': referredUserName,
-              'joinedAt': data['joinedAt'] ?? data['timestamp'] ?? Timestamp.now(),
-            });
-          }
-        }
-      }
-      
       setState(() {
-        successfulReferrals = referralsWithNames;
-        monthsEarned = (referralCount >= 3) ? 3 : referralCount; // Max 3 months per year
-        isLoadingReferralData = false;
+        _clients = snapshot.docs.map((doc) {
+          final data = doc.data();
+          return {
+            'id': doc.id,
+            'name': data['name'] ?? 'Unknown',
+            'email': data['email'] ?? '',
+          };
+        }).toList();
       });
     } catch (e) {
-      print('Error fetching referral data: $e');
+      print('Error loading clients: $e');
+    } finally {
+      setState(() => _isLoadingClients = false);
+    }
+  }
+
+  Future<void> _fetchTrainerInfo() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      _trainerEmail = user.email ?? '';
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      final data = snapshot.data();
       setState(() {
-        isLoadingReferralData = false;
+        final fetchedName = (data != null && data['name'] != null)
+            ? data['name'].toString().trim()
+            : '';
+        _trainerNameController.text =
+            fetchedName.isNotEmpty ? fetchedName : _trainerEmail;
       });
     }
   }
 
-
-  // Generate a referral code from user ID
-  String _generateReferralCode(String uid) {
-    return uid.substring(0, 8).toUpperCase();
-  }
-
-  // Function to handle referral sharing with dynamic app links
-  // Function to handle referral sharing with dynamic app links
-  Future<void> _shareReferral() async {
-    if (userReferralCode == null) return;
-    
-    final String message = "Join Fitness Hub! 💪\n"
-      "Use my referral code: $userReferralCode\n"
-      "New members get a special discount, and I'll earn a free month too! 🎉\n\n"
-      "Download the app here: https://play.google.com/store/apps/details?id=com.yourfitnessapp&referrer=referral_code%3D$userReferralCode";
-    final String subject = "Fitness App Referral";
-    
-    await Share.share(message, subject: subject);
-  }
-
-  // Function to copy referral link to clipboard
-  Future<void> _copyReferralLink() async {
-    if (userReferralCode == null) return;
-    
-    final String referralLink = "https://play.google.com/store/apps/details?id=com.yourfitnessapp&referrer=referral_code%3D$userReferralCode";
-    await FlutterClipboard.copy(referralLink);
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Personalized referral link copied to clipboard!')),
-    );
-  }
-
-  // Function to share via specific platform with personalized link
-  // Function to share via specific platform with personalized link
-  Future<void> _shareViaPlatform(String platform) async {
-    if (userReferralCode == null) return;
-    
-    final String message = "Join Fitness Hub! 💪\n"
-      "Use my referral code: $userReferralCode\n"
-      "New members get a special discount, and I'll earn a free month too! 🎉";
-    final String referralLink = "https://play.google.com/store/apps/details?id=com.yourfitnessapp&referrer=referral_code%3D$userReferralCode";
-    
-    switch (platform) {
-      case 'whatsapp':
-        final encodedMessage = Uri.encodeComponent('$message\n$referralLink');
-        final whatsappUrl = "whatsapp://send?text=$encodedMessage";
-        if (await canLaunchUrl(Uri.parse(whatsappUrl))) {
-          await launchUrl(Uri.parse(whatsappUrl));
-        } else {
-          // Fallback to regular share if WhatsApp is not installed
-          await Share.share('$message\n$referralLink', subject: "Fitness App Referral");
-        }
-        break;
-      case 'email':
-        final String subject = "Fitness App Referral";
-        final String body = "$message\n\n$referralLink";
-        final String encodedSubject = Uri.encodeComponent(subject);
-        final String encodedBody = Uri.encodeComponent(body);
-        final emailUrl = "mailto:?subject=$encodedSubject&body=$encodedBody";
-        if (await canLaunchUrl(Uri.parse(emailUrl))) {
-          await launchUrl(Uri.parse(emailUrl));
-        } else {
-          // Fallback to regular share
-          await Share.share('$message\n$referralLink', subject: subject);
-        }
-        break;
-    }
-  }
-  String _getCategoryEmoji(String category) {
-    switch (category) {
-      case 'Important':
-        return '⚠';
-      case 'Birthday':
-        return '🎂';
-      case 'Event':
-        return '📅';
-      case 'Promotion':
-        return '🎁';
-      case 'Referral':
-        return '👥';
-      case 'General':
-      default:
-        return '📢';
+  Future<void> _pickImage() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: ImageSource.gallery);
+    if (picked != null) {
+      setState(() {
+        _selectedImage = File(picked.path);
+      });
     }
   }
 
-  Color _getCardColorByDate(DateTime timestamp) {
-    final now = DateTime.now();
-    final difference = now.difference(timestamp);
-    if (difference.inHours <= 24) {
-      return Colors.pink[50]!;
-    } else {
-      return Colors.grey[300]!;
+  Future<void> _pickPDF() async {
+    final result = await FilePicker.platform
+        .pickFiles(type: FileType.custom, allowedExtensions: ['pdf']);
+    if (result != null && result.files.single.path != null) {
+      setState(() {
+        _selectedPDF = File(result.files.single.path!);
+      });
     }
+  }
+
+  Future<String?> _uploadFile(File file, String folder) async {
+    try {
+      final fileName =
+          '$folder/${DateTime.now().millisecondsSinceEpoch}_${file.path.split('/').last}';
+      final ref = FirebaseStorage.instance.ref().child(fileName);
+      await ref.putFile(file);
+      return await ref.getDownloadURL();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Future<void> _postAnnouncement({String? docId}) async {
+    final title = _titleController.text.trim();
+    final message = _messageController.text.trim();
+    final trainerName = _trainerNameController.text.trim();
+
+    if (title.isEmpty || message.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please fill in all fields')),
+      );
+      return;
+    }
+
+    // Validate that at least one client is selected when audience is "Specific Clients"
+    if (_selectedAudience == 'Specific Clients' && _selectedClientIds.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select at least one client')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      String? imageUrl;
+      String? pdfUrl;
+
+      if (_selectedImage != null) {
+        imageUrl = await _uploadFile(_selectedImage!, 'announcements/images');
+        if (imageUrl == null) throw Exception('Image upload failed');
+      } else if (docId != null) {
+        final doc = await FirebaseFirestore.instance
+            .collection('announcements')
+            .doc(docId)
+            .get();
+        imageUrl = doc.data()?['imageUrl'];
+      }
+
+      if (_selectedPDF != null) {
+        pdfUrl = await _uploadFile(_selectedPDF!, 'announcements/pdfs');
+        if (pdfUrl == null) throw Exception('PDF upload failed');
+      } else if (docId != null) {
+        final doc = await FirebaseFirestore.instance
+            .collection('announcements')
+            .doc(docId)
+            .get();
+        pdfUrl = doc.data()?['pdfUrl'];
+      }
+
+      final data = {
+        'title': title,
+        'message': message,
+        'category': _selectedCategory,
+        'audience': _selectedAudience,
+        'imageUrl': imageUrl,
+        'pdfUrl': pdfUrl,
+        'timestamp': FieldValue.serverTimestamp(),
+        'trainerName': trainerName.isNotEmpty ? trainerName : _trainerEmail,
+        // This line ensures targetClientIds is saved correctly:
+        'targetClientIds': _selectedAudience == 'Specific Clients' ? _selectedClientIds : [],
+      };
+      if (docId != null) {
+        await FirebaseFirestore.instance
+            .collection('announcements')
+            .doc(docId)
+            .update(data);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Announcement updated')),
+        );
+      } else {
+        await FirebaseFirestore.instance
+            .collection('announcements')
+            .add(data);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Announcement posted successfully')),
+        );
+      }
+
+      _titleController.clear();
+      _messageController.clear();
+      _trainerNameController.clear();
+      setState(() {
+        _selectedImage = null;
+        _selectedPDF = null;
+        _selectedCategory = 'General';
+        _selectedAudience = 'All Users';
+        _selectedClientIds = [];
+      });
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error posting: ${e.toString()}')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  void _loadForEditing(Map<String, dynamic> data, String docId) {
+    _titleController.text = data['title'] ?? '';
+    _messageController.text = data['message'] ?? '';
+    _selectedCategory = data['category'] ?? 'General';
+    _selectedAudience = data['audience'] ?? 'All Users';
+    _trainerNameController.text = data['trainerName'] ?? '';
+    _selectedClientIds = List<String>.from(data['targetClientIds'] ?? []);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[100],
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1C2D5E),
         title: const Text('Announcements', style: TextStyle(color: Colors.white)),
+        backgroundColor: const Color(0xFF1A2B63),
         iconTheme: const IconThemeData(color: Colors.white),
-        actions: [
-          PopupMenuButton<String>(
-            onSelected: (value) {
-              setState(() {
-                if (value == 'all') {
-                  selectedCategories = [];
-                  searchQuery = '';
-                  showUnreadOnly = false;
-                } else {
-                  showUnreadOnly = value == 'unread';
-                }
-              });
-            },
-            itemBuilder: (BuildContext context) => [
-              const PopupMenuItem<String>(value: 'all', child: Text('All Announcements')),
-              const PopupMenuItem<String>(value: 'unread', child: Text('Unread Announcements')),
-            ],
-          ),
-        ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(90),
-          child: Padding(
-            padding: const EdgeInsets.all(12.0),
-            child: Column(
-              children: [
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
-                        blurRadius: 6,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          decoration: InputDecoration(
-                            hintText: 'Search announcements...',
-                            filled: true,
-                            fillColor: Colors.transparent,
-                            prefixIcon: const Icon(Icons.search, color: Color(0xFF1C2D5E)),
-                            border: InputBorder.none,
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                            hintStyle: TextStyle(color: Colors.grey[600]),
-                          ),
-                          onChanged: (val) {
-                            setState(() {
-                              searchQuery = val.toLowerCase();
-                            });
-                          },
-                        ),
-                      ),
-                      Container(
-                        height: 48,
-                        width: 1,
-                        color: Colors.grey[300],
-                      ),
-                      SizedBox(
-                        width: 56,
-                        child: IconButton(
-                          icon: const Icon(Icons.filter_list_rounded, color: Color(0xFF1C2D5E)),
-                          // In the filter button onPressed handler, replace with this:
-                          onPressed: () async {
-                            final categories = ['Birthday', 'General', 'Event', 'Important'];
-                            final selected = await showDialog<List<String>>(
-                              context: context,
-                              builder: (ctx) {
-                                List<String> tempSelected = [...selectedCategories];
-                                
-                                return StatefulBuilder(
-                                  builder: (context, setState) {
-                                    return AlertDialog(
-                                      title: const Text("Select Categories", style: TextStyle(fontWeight: FontWeight.bold)),
-                                      content: SizedBox(
-                                        width: double.maxFinite,
-                                        child: Column(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: categories.map((cat) {
-                                            return CheckboxListTile(
-                                              title: Text(cat),
-                                              value: tempSelected.contains(cat),
-                                              onChanged: (val) {
-                                                setState(() {
-                                                  if (val!) {
-                                                    tempSelected.add(cat);
-                                                  } else {
-                                                    tempSelected.remove(cat);
-                                                  }
-                                                });
-                                              },
-                                              contentPadding: EdgeInsets.zero,
-                                            );
-                                          }).toList(),
-                                        ),
-                                      ),
-                                      actions: [
-                                        TextButton(
-                                          onPressed: () {
-                                            Navigator.pop(ctx, <String>[]);
-                                          },
-                                          child: const Text("Clear All", style: TextStyle(color: Colors.red)),
-                                        ),
-                                        ElevatedButton(
-                                          onPressed: () {
-                                            Navigator.pop(ctx, tempSelected);
-                                          },
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: const Color(0xFF1C2D5E),
-                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                          ),
-                                          child: const Text("Apply", style: TextStyle(color: Colors.white)),
-                                        ),
-                                      ],
-                                    );
-                                  },
-                                );
-                              },
-                            );
-                            
-                            if (selected != null) {
-                              setState(() {
-                                selectedCategories = selected;
-                              });
-                            }
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 8),
-              ],
-            ),
-          ),
-        ),
-      ),
-      body: Column(
-        children: [
-          // Tab selector
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.grey.withOpacity(0.1),
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                _buildTabButton(0, 'Announcements', Icons.dashboard),
-                _buildTabButton(1, 'Promotions', Icons.local_offer),
-                _buildTabButton(2, 'Referrals', Icons.group),
-              ],
-            ),
-          ),
-          Expanded(
-            child: _selectedTab == 1 
-              ? _buildPromotionsTab() 
-              : _selectedTab == 2
-              ? _buildReferralsTab()
-              : _buildAnnouncementsTab(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildReferralsTab() {
-    if (isLoadingReferralData) {
-      return const Center(
-        child: CircularProgressIndicator(
-          valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF1C2D5E)),
-        ),
-      );
-    }
-
-    // Function to handle back button
-    void handleBack() {
-      setState(() {
-        showHowItWorks = false;
-        showMyReferrals = false;
-      });
-    }
-
-    // Show referral main content by default
-    if (!showHowItWorks && !showMyReferrals) {
-      return SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Combined Referral Header and Code Section
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1C2D5E),
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.2),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  const Text(
-                    "Refer a Friend",
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    "Share your referral code and both you and your friend will get 1 FREE SESSION!",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Colors.white70,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  
-                  // Benefits section
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Column(
-                      children: [
-                        RichText(
-                          textAlign: TextAlign.center,
-                          text: const TextSpan(
-                            children: [
-                              TextSpan(
-                                text: "When your friend signs up using your code,\n",
-                                style: TextStyle(color: Colors.white, fontSize: 16),
-                              ),
-                              TextSpan(
-                                text: "BOTH OF YOU GET 1 FREE SESSION!",
-                                style: TextStyle(
-                                  color: Colors.amber,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  
-                  // Your referral code section
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Column(
-                      children: [
-                        const Text(
-                          "Your Referral Code",
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF1C2D5E),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Container(
-                          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF1C2D5E),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.amber, width: 2),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                userReferralCode ?? "GENERATING...",
-                                style: const TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.amber,
-                                  letterSpacing: 2,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              IconButton(
-                                icon: const Icon(Icons.content_copy, color: Colors.amber, size: 20),
-                                onPressed: () {
-                                  if (userReferralCode != null) {
-                                    FlutterClipboard.copy(userReferralCode!);
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(content: Text('Referral code copied to clipboard!')),
-                                    );
-                                  }
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        const Text(
-                          "Share this code with your friends",
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  
-                  // Share button
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _shareReferral,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.amber,
-                        foregroundColor: const Color(0xFF1C2D5E),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      child: const Text(
-                        "Share This Deal",
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            
-            const SizedBox(height: 24),
-          
-            // Action buttons row
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      setState(() {
-                        showHowItWorks = true;
-                        showMyReferrals = false;
-                      });
-                    },
-                    icon: const Icon(Icons.help_outline),
-                    label: const Text("How It Works"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1C2D5E),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      setState(() {
-                        showMyReferrals = true;
-                        showHowItWorks = false;
-                      });
-                    },
-                    icon: const Icon(Icons.people_outline),
-                    label: const Text("View My Referrals"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1C2D5E),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            
-            const SizedBox(height: 24),
-            
-            // Terms and conditions
-            const Center(
-              child: Text(
-                "Terms and Conditions",
-                style: TextStyle(
-                  color: Colors.blue,
-                  decoration: TextDecoration.underline,
-                ),
-              ),
-            ),
+        bottom: TabBar(
+          controller: _tabController,
+          indicatorColor: Colors.white,
+          labelStyle: const TextStyle(fontWeight: FontWeight.bold),
+          tabs: const [
+            Tab(icon: Icon(Icons.announcement), text: 'Announcements'),
+            Tab(icon: Icon(Icons.group), text: 'Referrals'),
+            Tab(icon: Icon(Icons.local_offer), text: 'Promotions'),
           ],
         ),
-      );
-    }
-    
-    // Show How It Works section
-    else if (showHowItWorks) {
-      return Column(
+      ),
+      body: TabBarView(
+        controller: _tabController,
         children: [
-          // Back button
-          Container(
-            padding: const EdgeInsets.all(16),
-            color: Colors.white,
-            child: Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.arrow_back),
-                  onPressed: handleBack,
-                ),
-                const SizedBox(width: 8),
-                const Text(
-                  "How It Works",
-                  style: TextStyle(
+          _announcementForm(),
+          const ReferralsTab(),
+          const PromotionsTab(),
+        ],
+      ),
+    );
+  }
+
+  Widget _announcementForm() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Card(
+        elevation: 8,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: Colors.grey.shade200, width: 1),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Create Announcement',
+                style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
+                    color: Color(0xFF1A2B63)),
+              ),
+              const SizedBox(height: 20),
+              TextField(
+                controller: _titleController,
+                decoration: InputDecoration(
+                  labelText: 'Title',
+                  labelStyle: const TextStyle(color: Colors.grey),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF1A2B63), width: 2),
                   ),
                 ),
-              ],
-            ),
-          ),
-          
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  // How it works content
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.grey.withOpacity(0.2),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Center(
-                          child: Text(
-                            "How it works",
-                            style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF1C2D5E),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        const Divider(height: 1, color: Colors.grey),
-                        const SizedBox(height: 16),
-                        
-                        _buildHowItWorksItem("1. Share your unique referral code with friends"),
-                        _buildHowItWorksItem("2. Friends sign up using your referral code"),
-                        _buildHowItWorksItem("3. The referral link will automatically include your code during signup"),
-                        _buildHowItWorksItem("4. After successful signup, both you and your friend get 1 FREE SESSION!"),
-                        _buildHowItWorksItem("5. Track your referrals in the 'View My Referrals' section"),
-                      ],
-                    ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _trainerNameController,
+                decoration: InputDecoration(
+                  labelText: 'Your Name (shown to users)',
+                  labelStyle: const TextStyle(color: Colors.grey),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  
-                  const SizedBox(height: 24),
-                  
-                  // Share button at bottom for How It Works
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _shareReferral,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.amber,
-                        foregroundColor: const Color(0xFF1C2D5E),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF1A2B63), width: 2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _messageController,
+                maxLines: 4,
+                decoration: InputDecoration(
+                  labelText: 'Message',
+                  labelStyle: const TextStyle(color: Colors.grey),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF1A2B63), width: 2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                value: _selectedCategory,
+                decoration: InputDecoration(
+                  labelText: 'Category',
+                  labelStyle: const TextStyle(color: Colors.grey),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF1A2B63), width: 2),
+                  ),
+                ),
+                items: _categories
+                    .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                    .toList(),
+                onChanged: (v) => setState(() => _selectedCategory = v!),
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                value: _selectedAudience,
+                decoration: InputDecoration(
+                  labelText: 'Audience',
+                  labelStyle: const TextStyle(color: Colors.grey),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF1A2B63), width: 2),
+                  ),
+                ),
+                items: _audiences
+                    .map((a) => DropdownMenuItem(value: a, child: Text(a)))
+                    .toList(),
+                onChanged: (v) => setState(() => _selectedAudience = v!),
+              ),
+              if (_selectedAudience == 'Specific Clients') ...[
+                const SizedBox(height: 16),
+                const Text('Select Clients',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                _isLoadingClients
+                    ? const CircularProgressIndicator()
+                    : Container(
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey),
                           borderRadius: BorderRadius.circular(8),
                         ),
-                      ),
-                      child: const Text(
-                        "Share This Deal",
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-    
-    // Show My Referrals section - ENHANCED UI
-    else {
-      return Column(
-        children: [
-          // Enhanced header with gradient
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xFF1C2D5E), Color(0xFF2D3F73)],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black26,
-                  blurRadius: 8,
-                  offset: Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.arrow_back, color: Colors.white),
-                  onPressed: handleBack,
-                ),
-                const SizedBox(width: 8),
-                const Text(
-                  "My Referrals",
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-                const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    "$referralCount Referrals",
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          
-          Expanded(
-            child: Container(
-              color: Colors.grey[50],
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    // Summary cards in a row
-                    Row(
-                      children: [
-                        // Referral Count Card
-                        Expanded(
-                          child: Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(12),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.grey.withOpacity(0.1),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                            child: Column(
-                              children: [
-                                Container(
-                                  width: 40,
-                                  height: 40,
-                                  decoration: const BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: Color(0xFF1C2D5E),
-                                  ),
-                                  child: const Icon(Icons.group, color: Colors.white, size: 20),
-                                ),
-                                const SizedBox(height: 8),
-                                const Text(
-                                  "Referrals",
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.grey,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  "$referralCount",
-                                  style: const TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF1C2D5E),
-                                  ),
-                                ),
-                              ],
-                            ),
+                        child: ExpansionTile(
+                          title: Text(
+                            _selectedClientIds.isEmpty
+                                ? 'Select clients'
+                                : '${_selectedClientIds.length} client(s) selected',
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        
-                        // Free Sessions Earned Card
-                        Expanded(
-                          child: Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(12),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.grey.withOpacity(0.1),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                            child: Column(
-                              children: [
-                                Container(
-                                  width: 40,
-                                  height: 40,
-                                  decoration: const BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: Colors.amber,
-                                  ),
-                                  child: const Icon(Icons.emoji_events, color: Colors.white, size: 20),
-                                ),
-                                const SizedBox(height: 8),
-                                const Text(
-                                  "Free Sessions",
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.grey,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  "$referralCount",
-                                  style: const TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF1C2D5E),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    
-                    const SizedBox(height: 16),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          
-          // Share button at bottom (outside Expanded to stay at bottom)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            child: ElevatedButton(
-              onPressed: _shareReferral,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1C2D5E),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                elevation: 4,
-              ),
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.share),
-                  SizedBox(width: 8),
-                  Text(
-                    "Share Referral Link",
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-  }
-  Widget _buildHowItWorksItem(String text) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.check_circle, color: Colors.green, size: 20),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              text,
-              style: const TextStyle(fontSize: 16),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildShareButton(IconData icon, String label, VoidCallback onPressed) {
-    return Column(
-      children: [
-        Container(
-          width: 60,
-          height: 60,
-          decoration: BoxDecoration(
-            color: const Color(0xFF1C2D5E),
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.grey.withOpacity(0.3),
-                blurRadius: 6,
-                offset: const Offset(0, 3),
-              ),
-            ],
-          ),
-          child: IconButton(
-            icon: Icon(icon, size: 28, color: Colors.white),
-            onPressed: onPressed,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ],
-    );
-  }
-  Widget _buildBenefitItem(String text) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.check_circle, color: Colors.green, size: 20),
-          const SizedBox(width: 8),
-          Expanded(child: Text(text)),
-        ],
-      ),
-    );
-  }
-  
-  Widget _buildPromotionsTab() {
-    print('Building promotions tab'); // Debug print
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('promotions')
-          .orderBy('start', descending: true)
-          .snapshots(),
-      builder: (context, snapshot) {
-        print('Promotions snapshot state: ${snapshot.connectionState}'); // Debug print
-        
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF1C2D5E)),
-                ),
-                SizedBox(height: 16),
-                Text('Loading promotions...')
-              ],
-            ),
-          );
-        }
-
-        if (snapshot.hasError) {
-          print('Promotions error: ${snapshot.error}'); // Debug print
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.error, size: 64, color: Colors.red),
-                const SizedBox(height: 16),
-                Text('Error: ${snapshot.error}'),
-                const SizedBox(height: 8),
-                ElevatedButton(
-                  onPressed: () => setState(() {}),
-                  child: const Text('Retry'),
-                ),
-              ],
-            ),
-          );
-        }
-
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          print('No promotions data'); // Debug print
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.local_offer,
-                  size: 64,
-                  color: Colors.grey[400],
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'No promotions available',
-                  style: TextStyle(
-                    fontSize: 18,
-                    color: Colors.grey[600],
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Check back later for exciting offers!',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey[500],
-                  ),
-                ),
-              ],
-            ),
-          );
-        }
-
-        print('Found ${snapshot.data!.docs.length} promotions'); // Debug print
-
-        List<DocumentSnapshot> promotions = snapshot.data!.docs.where((doc) {
-          final data = doc.data() as Map<String, dynamic>?;
-          if (data == null) return false;
-          
-          // Check if promotion is active
-          final isActive = data['active'] == true;
-          if (!isActive) return false;
-          
-          // Enhanced search filter for promotions
-          bool matchSearch = searchQuery.isEmpty;
-          if (!matchSearch) {
-            final title = data['title']?.toString()?.toLowerCase() ?? '';
-            final description = data['description']?.toString()?.toLowerCase() ?? '';
-            final code = data['code']?.toString()?.toLowerCase() ?? '';
-            final offer = data['offer']?.toString()?.toLowerCase() ?? '';
-            
-            // Check date if available
-            String startDateStr = '';
-            String endDateStr = '';
-            if (data['start'] != null) {
-              final startDate = (data['start'] as Timestamp).toDate();
-              startDateStr = DateFormat('yyyy-MM-dd').format(startDate).toLowerCase();
-            }
-            if (data['end'] != null) {
-              final endDate = (data['end'] as Timestamp).toDate();
-              endDateStr = DateFormat('yyyy-MM-dd').format(endDate).toLowerCase();
-            }
-            
-            matchSearch = title.contains(searchQuery) || 
-                        description.contains(searchQuery) || 
-                        code.contains(searchQuery) ||
-                        offer.contains(searchQuery) ||
-                        startDateStr.contains(searchQuery) ||
-                        endDateStr.contains(searchQuery);
-          }
-          
-          return matchSearch;
-        }).toList();
-
-        print('Filtered promotions: ${promotions.length}'); // Debug print
-
-        if (promotions.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.search_off,
-                  size: 64,
-                  color: Colors.grey[400],
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'No matching promotions found',
-                  style: TextStyle(
-                    fontSize: 18,
-                    color: Colors.grey[600],
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Try different search terms',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey[500],
-                  ),
-                ),
-              ],
-            ),
-          );
-        }
-
-        return ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: promotions.length,
-          itemBuilder: (context, index) {
-            final doc = promotions[index];
-            final data = doc.data() as Map<String, dynamic>;
-            return _buildPromotionCard(data, doc.id);
-          },
-        );
-      },
-    );
-  }
-
-  // Replace the existing _buildAnnouncementsTab() method with this updated version
-
-  Widget _buildAnnouncementsTab() {
-    final currentUserId = FirebaseAuth.instance.currentUser?.uid;
-    
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('announcements')  
-          .orderBy('timestamp', descending: true)
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(
-            child: CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF1C2D5E)),
-            ),
-          );
-        }
-
-        if (snapshot.hasError) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.error, size: 64, color: Colors.red),
-                const SizedBox(height: 16),
-                Text('Error: ${snapshot.error}'),
-                ElevatedButton(
-                  onPressed: () => setState(() {}),
-                  child: const Text('Retry'),
-                ),
-              ],
-            ),
-          );
-        }
-
-        if (!snapshot.hasData) {
-          return const Center(child: Text('No data'));
-        }
-
-        final uid = FirebaseAuth.instance.currentUser!.uid;
-
-        List<DocumentSnapshot> filtered = snapshot.data!.docs.where((doc) {
-          final data = doc.data() as Map<String, dynamic>?;
-          if (data == null) return false;
-          
-          final docId = doc.id;
-          
-          // Check if timestamp exists
-          if (data['timestamp'] == null) return false;
-          final announcementTime = (data['timestamp'] as Timestamp).toDate();
-
-          // Filter out announcements before user signup date
-          if (userSignupDate != null && announcementTime.isBefore(userSignupDate!)) {
-            return false;
-          }
-
-          // Check audience restrictions
-          final audience = data['audience'] ?? 'All Users';
-          if (audience == 'Specific Clients') {
-            final targetClientIds = List<String>.from(data['targetClientIds'] ?? []);
-            // Only show if current user is in the target list
-            if (!targetClientIds.contains(currentUserId)) {
-              return false;
-            }
-          }
-
-          // Filter by category
-          bool matchCategory = selectedCategories.isEmpty || 
-              (data['category'] != null && selectedCategories.contains(data['category']));
-          
-          // Enhanced search functionality
-          bool matchSearch = searchQuery.isEmpty;
-          if (!matchSearch) {
-            final title = data['title']?.toString()?.toLowerCase() ?? '';
-            final message = data['message']?.toString()?.toLowerCase() ?? '';
-            final category = data['category']?.toString()?.toLowerCase() ?? '';
-            final dateStr = DateFormat('yyyy-MM-dd').format(announcementTime).toLowerCase();
-            final timeStr = DateFormat('hh:mm a').format(announcementTime).toLowerCase();
-            
-            matchSearch = title.contains(searchQuery) || 
-                        message.contains(searchQuery) || 
-                        category.contains(searchQuery) ||
-                        dateStr.contains(searchQuery) ||
-                        timeStr.contains(searchQuery);
-          }
-          
-          // FIXED: Properly handle unread filter
-          bool matchUnread = true;
-          if (showUnreadOnly) {
-            matchUnread = !readAnnouncements.contains(docId);
-          }
-
-          return matchCategory && matchSearch && matchUnread;
-        }).toList();
-
-
-        filtered.sort((a, b) {
-          final aData = a.data() as Map<String, dynamic>;
-          final bData = b.data() as Map<String, dynamic>;
-          if (aData['timestamp'] == null || bData['timestamp'] == null) return 0;
-          
-          final aTime = (aData['timestamp'] as Timestamp).toDate();
-          final bTime = (bData['timestamp'] as Timestamp).toDate();
-          return bTime.compareTo(aTime);
-        });
-
-        if (filtered.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.announcement,
-                  size: 64,
-                  color: Colors.grey[400],
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'No announcements found',
-                  style: TextStyle(
-                    fontSize: 18,
-                    color: Colors.grey[600],
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Try adjusting your filters or check back later',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey[500],
-                  ),
-                ),
-              ],
-            ),
-          );
-        }
-
-        return ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: filtered.length,
-          itemBuilder: (context, index) {
-            final doc = filtered[index];
-            final data = doc.data() as Map<String, dynamic>;
-            final docId = doc.id;
-            
-            // Special handling for referral posts
-            if (data['category'] == 'Referral') {
-              return _buildReferralCard(data, docId);
-            }
-            
-            final comments = (data['comments'] ?? []) as List<dynamic>;
-            final rawReactions = data['reactions'] ?? {};
-            final reactions = Map<String, dynamic>.from(rawReactions);
-            final currentReaction = reactions[uid];
-            final postTime = (data['timestamp'] as Timestamp).toDate();
-            final isBookmarked = userBookmarks.contains(docId);
-            final category = data['category'] ?? 'General';
-
-            final isNew = DateTime.now().difference(postTime).inHours <= 24 && 
-                        !readAnnouncements.contains(docId);
-            final emoji = _getCategoryEmoji(category);
-
-            final TextEditingController commentController = TextEditingController();
-
-            return GestureDetector(
-              onTap: () {
-                // Mark as read when user taps anywhere on the card
-                if (!readAnnouncements.contains(docId)) {
-                  _markAsRead(docId);
-                }
-              },
-              child: Container(
-                margin: const EdgeInsets.only(bottom: 20),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  color: readAnnouncements.contains(docId) 
-                      ? Colors.grey[100]  // Light grey background for read announcements
-                      : Colors.white,     // White background for unread announcements
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.08),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Header section with gradient
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [
-                            const Color(0xFF1C2D5E).withOpacity(0.95),
-                            const Color(0xFF2D3F73),
-                          ],
-                        ),
-                        borderRadius: const BorderRadius.only(
-                          topLeft: Radius.circular(16),
-                          topRight: Radius.circular(16),
-                        ),
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Category emoji badge
-                          Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.2),
-                              shape: BoxShape.circle,
-                            ),
-                            child: Center(
-                              child: Text(
-                                emoji,
-                                style: const TextStyle(fontSize: 18),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                // Title and new indicator
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        data['title'] ?? 'No Title',
-                                        style: TextStyle(
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.w700,
-                                          color: Colors.white,
-                                          height: 1.3,
-                                        ),
-                                      ),
-                                    ),
-                                    if (isNew)
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                        decoration: BoxDecoration(
-                                          color: Colors.amber,
-                                          borderRadius: BorderRadius.circular(12),
-                                        ),
-                                        child: const Text(
-                                          'NEW',
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                                const SizedBox(height: 6),
-                                // Date and time
-                                Row(
-                                  children: [
-                                    Icon(Icons.access_time, size: 14, color: Colors.white.withOpacity(0.7)),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      DateFormat('MMM dd, yyyy · hh:mm a').format(postTime),
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.white.withOpacity(0.8),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    
-                    // Message content
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Text(
-                        data['message'] ?? '',
-                        style: const TextStyle(
-                          fontSize: 15,
-                          height: 1.5,
-                          color: Colors.black87,
-                        ),
-                      ),
-                    ),
-                    
-                    // Category badge - Improved design
-                    Padding(
-                      padding: const EdgeInsets.only(left: 16, right: 16, bottom: 12),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF1C2D5E).withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: const Color(0xFF1C2D5E).withOpacity(0.3),
-                            width: 1.5,
-                          ),
-                        ),
-                        child: Text(
-                          category.toUpperCase(),
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: const Color(0xFF1C2D5E),
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                      ),
-                    ),
-                    
-                    // Media attachments
-                    if (data['imageUrl'] != null && (data['imageUrl'] as String).isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 16, right: 16, bottom: 12),
-                        child: GestureDetector(
-                          onTap: () async {
-                            await showDialog(
-                              context: context,
-                              builder: (_) => Dialog(
-                                backgroundColor: Colors.transparent,
-                                insetPadding: const EdgeInsets.all(20),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: Image.network(
-                                    data['imageUrl'],
-                                    fit: BoxFit.contain,
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                          child: Hero(
-                            tag: 'image-$docId',
-                            child: Container(
-                              height: 200,
-                              width: double.infinity,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(12),
-                                image: DecorationImage(
-                                  image: NetworkImage(data['imageUrl']),
-                                  fit: BoxFit.cover,
-                                ),
-                              ),
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(12),
-                                  color: Colors.black.withOpacity(0.2),
-                                ),
-                                child: const Center(
-                                  child: Icon(
-                                    Icons.zoom_in,
-                                    color: Colors.white,
-                                    size: 36,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    
-                    if (data['pdfUrl'] != null && (data['pdfUrl'] as String).isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 16, right: 16, bottom: 12),
-                        child: GestureDetector(
-                          onTap: () async {
-                            final pdfUrl = data['pdfUrl'];
-                            try {
-                              await launchUrl(Uri.parse(pdfUrl),
-                                  mode: LaunchMode.externalApplication);
-                            } catch (e) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Could not open PDF: $e')),
-                              );
-                            }
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF5F7FF),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: const Color(0xFF1C2D5E).withOpacity(0.2),
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(8),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF1C2D5E).withOpacity(0.1),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Icon(Icons.picture_as_pdf, color: Colors.red, size: 20),
-                                ),
-                                const SizedBox(width: 12),
-                                const Expanded(
-                                  child: Text(
-                                    'View PDF Document',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 14,
-                                      color: Color(0xFF1C2D5E),
-                                    ),
-                                  ),
-                                ),
-                                Icon(Icons.open_in_new, color: Colors.grey[600], size: 20),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    
-                    // Reactions section
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: ['👍', '❤', '🎉', '👏'].map((emoji) {
-                          final count = reactions.values.where((v) => v == emoji).length;
-                          final isSelected = currentReaction == emoji;
-                          return GestureDetector(
-                            onTap: () {
-                              _toggleReaction(docId, isSelected ? null : emoji);
-                              // Mark as read when user reacts
-                              if (!readAnnouncements.contains(docId)) {
-                                _markAsRead(docId);
-                              }
-                            },
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 200),
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: isSelected 
-                                    ? const Color(0xFF1C2D5E).withOpacity(0.1) 
-                                    : Colors.grey[100],
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                  color: isSelected 
-                                      ? const Color(0xFF1C2D5E) 
-                                      : Colors.transparent,
-                                  width: 1.5,
-                                ),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(emoji, style: const TextStyle(fontSize: 16)),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    count > 0 ? count.toString() : '',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                      color: isSelected ? const Color(0xFF1C2D5E) : Colors.grey[700],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                    
-                    // Action buttons
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          // Bookmark button - FILLED STYLE
-                          ElevatedButton.icon(
-                            onPressed: () {
-                              _toggleBookmark(docId);
-                              // Mark as read when user bookmarks
-                              if (!readAnnouncements.contains(docId)) {
-                                _markAsRead(docId);
-                              }
-                            },
-                            icon: Icon(
-                              isBookmarked ? Icons.bookmark : Icons.bookmark_outline,
-                              color: Colors.white,
-                              size: 18,
-                            ),
-                            label: Text(
-                              isBookmarked ? 'Saved' : 'Save',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                                color: Colors.white,
-                              ),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: isBookmarked ? Colors.green : const Color(0xFF1C2D5E),
-                              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                            ),
-                          ),
-                          
-                          // Share button - FILLED WITH BLACK BACKGROUND AND WHITE TEXT
-                          ElevatedButton.icon(
-                            onPressed: () {
-                              Share.share('${data['title']}\n\n${data['message'] ?? ''}');
-                              // Mark as read when user shares
-                              if (!readAnnouncements.contains(docId)) {
-                                _markAsRead(docId);
-                              }
-                            },
-                            icon: const Icon(Icons.share, size: 16, color: Colors.white),
-                            label: const Text(
-                              'Share',
-                              style: TextStyle(
-                                fontSize: 13, 
-                                fontWeight: FontWeight.w500,
-                                color: Colors.white,
-                              ),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF1C2D5E),
-                              foregroundColor: Colors.white, // Text and icon color
-                              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    
-                    // Comments section
-                    if (comments.isNotEmpty)
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.grey[50],
-                          borderRadius: const BorderRadius.only(
-                            bottomLeft: Radius.circular(16),
-                            bottomRight: Radius.circular(16),
-                          ),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              "Comments",
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 15,
-                                color: Color(0xFF1C2D5E),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            ...comments.map((comment) {
-                              final commentTime = (comment['timestamp'] as Timestamp).toDate();
-                              return Container(
-                                margin: const EdgeInsets.only(bottom: 12),
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(12),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.05),
-                                      blurRadius: 4,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Text(
-                                          comment['username'] ?? 'Anonymous',
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w600,
-                                            fontSize: 13,
-                                          ),
-                                        ),
-                                        const Spacer(),
-                                        Text(
-                                          DateFormat('MMM dd, yyyy').format(commentTime),
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            color: Colors.grey[600],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      comment['text'] ?? '', 
-                                      style: const TextStyle(fontSize: 14),
-                                    ),
-                                  ],
-                                ),
+                            ..._clients.map((client) {
+                              final isSelected = _selectedClientIds.contains(client['id']);
+                              return CheckboxListTile(
+                                title: Text('${client['name']} (${client['email']})'),
+                                value: isSelected,
+                                onChanged: (value) {
+                                  setState(() {
+                                    if (value == true) {
+                                      _selectedClientIds.add(client['id']);
+                                    } else {
+                                      _selectedClientIds.remove(client['id']);
+                                    }
+                                  });
+                                },
                               );
                             }).toList(),
                           ],
                         ),
                       ),
-                    
-                    // Add comment section
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[100],
-                        borderRadius: comments.isEmpty 
-                            ? const BorderRadius.only(
-                                bottomLeft: Radius.circular(16),
-                                bottomRight: Radius.circular(16),
-                              )
-                            : BorderRadius.circular(0),
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: commentController,
-                              decoration: InputDecoration(
-                                hintText: 'Add a comment...',
-                                filled: true,
-                                fillColor: Colors.white,
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(24),
-                                  borderSide: BorderSide.none,
-                                ),
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 12,
-                                ),
-                                hintStyle: const TextStyle(fontSize: 14),
-                              ),
-                              onTap: () {
-                                // Mark as read when user taps on comment field
-                                if (!readAnnouncements.contains(docId)) {
-                                  _markAsRead(docId);
-                                }
-                              },
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Container(
-                            decoration: const BoxDecoration(
-                              color: Color(0xFF1C2D5E),
-                              shape: BoxShape.circle,
-                            ),
-                            child: IconButton(
-                              icon: const Icon(Icons.send, color: Colors.white, size: 20),
-                              onPressed: () {
-                                if (commentController.text.trim().isNotEmpty) {
-                                  _addComment(docId, commentController.text.trim());
-                                  commentController.clear();
-                                  FocusScope.of(context).unfocus();
-                                  // Mark as read when user comments
-                                  if (!readAnnouncements.contains(docId)) {
-                                    _markAsRead(docId);
-                                  }
-                                }
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-  Widget _buildTabButton(int index, String title, IconData icon) {
-    return Expanded(
-      child: Material(
-        color: _selectedTab == index ? const Color(0xFF1C2D5E).withOpacity(0.1) : Colors.transparent,
-        child: InkWell(
-          onTap: () {
-            setState(() {
-              _selectedTab = index;
-            });
-          },
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  icon,
-                  color: _selectedTab == index ? const Color(0xFF1C2D5E) : Colors.grey[600],
-                  size: 20,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: _selectedTab == index ? FontWeight.bold : FontWeight.normal,
-                    color: _selectedTab == index ? const Color(0xFF1C2D5E) : Colors.grey[600],
-                  ),
-                ),
               ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPromotionCard(Map<String, dynamic> data, String docId) {
-    final isBookmarked = userBookmarks.contains(docId);
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Card(
-        margin: EdgeInsets.zero,
-        color: Colors.orange[50],
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        elevation: 4,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+              const SizedBox(height: 20),
+              const Text('Attachments',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              const SizedBox(height: 12),
               Row(
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.orange[100],
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(
-                      Icons.local_offer,
-                      color: Colors.orange,
-                      size: 24,
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _pickImage,
+                      icon: const Icon(Icons.image, color: Color(0xFF1A2B63)),
+                      label: const Text('Add Image',
+                          style: TextStyle(color: Color(0xFF1A2B63))),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        side: const BorderSide(color: Color(0xFF1A2B63)),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          data['title'] ?? 'No Title',
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.orange,
-                          ),
-                        ),
-                        Text(
-                          data['offer'] ?? 'Special Offer',
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF1C2D5E),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.green[100],
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Text(
-                      'ACTIVE',
-                      style: TextStyle(
-                        color: Colors.green,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
+                    child: OutlinedButton.icon(
+                      onPressed: _pickPDF,
+                      icon:
+                          const Icon(Icons.picture_as_pdf, color: Color(0xFF1A2B63)),
+                      label: const Text('Add PDF',
+                          style: TextStyle(color: Color(0xFF1A2B63))),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        side: const BorderSide(color: Color(0xFF1A2B63)),
                       ),
                     ),
                   ),
                 ],
               ),
               const SizedBox(height: 12),
-              Text(
-                data['description'] ?? 'No description available',
-                style: const TextStyle(
-                  fontSize: 14,
-                  color: Colors.black87,
-                  height: 1.4,
-                ),
-              ),
-              const SizedBox(height: 12),
-              if (data['code'] != null && data['code'].toString().isNotEmpty)
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.blue[50],
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.blue[200]!),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.confirmation_number, color: Colors.blue),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Code: ${data['code']}',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                          color: Colors.blue,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              const SizedBox(height: 12),
-              if (data['start'] != null && data['end'] != null) ...[
-                Row(
+              if (_selectedImage != null || _selectedPDF != null) ...[
+                Wrap(
+                  spacing: 8,
                   children: [
-                    Icon(Icons.access_time, size: 16, color: Colors.grey[600]),
-                    const SizedBox(width: 4),
-                    Text(
-                      'Valid: ${DateFormat.yMMMd().format((data['start'] as Timestamp).toDate())} - ${DateFormat.yMMMd().format((data['end'] as Timestamp).toDate())}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[600],
+                    if (_selectedImage != null)
+                      Chip(
+                        label: Text(_selectedImage!.path.split('/').last),
+                        deleteIcon: const Icon(Icons.close),
+                        onDeleted: () => setState(() => _selectedImage = null),
                       ),
-                    ),
+                    if (_selectedPDF != null)
+                      Chip(
+                        label: Text(_selectedPDF!.path.split('/').last),
+                        deleteIcon: const Icon(Icons.close),
+                        onDeleted: () => setState(() => _selectedPDF = null),
+                      ),
                   ],
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 20),
               ],
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  ElevatedButton.icon(
-                    onPressed: () => _toggleBookmark(docId),
-                    icon: Icon(isBookmarked ? Icons.bookmark : Icons.bookmark_border),
-                    label: const Text("Bookmark"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.deepPurple.shade100,
-                      foregroundColor: Colors.deepPurple,
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _isLoading
+                      ? null
+                      : () => _postAnnouncement(docId: widget.editDocId),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1A2B63),
+                    padding: const EdgeInsets.symmetric(vertical: 18),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    elevation: 3,
+                  ),
+                  child: _isLoading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
+                        )
+                      : Text(
+                          widget.editDocId != null
+                              ? 'Update Announcement'
+                              : 'Post Announcement',
+                          style: const TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Center(
+                child: TextButton(
+                  onPressed: () {
+                    Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (c) => const PostedAnnouncementsScreen()));
+                  },
+                  child: const Text(
+                    'View Posted Announcements',
+                    style: TextStyle(
+                      color: Color(0xFF1A2B63),
+                      decoration: TextDecoration.underline,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                  ElevatedButton.icon(
-                    onPressed: () => _openPromotionLink(data['link']),
-                    icon: const Icon(Icons.shopping_cart),
-                    label: const Text("Get Offer"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1C2D5E),
-                      foregroundColor: Colors.white,
-                    ),
-                  ),
-                ],
+                ),
               ),
             ],
           ),
@@ -2181,123 +539,1099 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
       ),
     );
   }
+}
 
-  Widget _buildReferralCard(Map<String, dynamic> data, String docId) {
-    final postTime = (data['timestamp'] as Timestamp).toDate();
-    final isBookmarked = userBookmarks.contains(docId);
-    final cardColor = _getCardColorByDate(postTime);
-    final emoji = _getCategoryEmoji('Referral');
+class ReferralsTab extends StatefulWidget {
+  const ReferralsTab({super.key});
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Card(
-        margin: EdgeInsets.zero,
-        color: cardColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        elevation: 3,
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              GestureDetector(
-                onTap: () {
-                  setState(() {
-                    if (_expandedAnnouncements.contains(docId)) {
-                      _expandedAnnouncements.remove(docId);
-                    } else {
-                      _expandedAnnouncements.add(docId);
-                      _markAsRead(docId);
-                    }
-                  });
-                },
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        "$emoji ${data['title'] ?? ''}",
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: readAnnouncements.contains(docId) ? Colors.black : Colors.black87,
+  @override
+  State<ReferralsTab> createState() => _ReferralsTabState();
+}
+
+class _ReferralsTabState extends State<ReferralsTab> {
+  String _referralCode = '';
+  String _referralLink = '';
+
+  String _rewardTitle = '1 Free Session';
+  String _rewardDescription =
+      'after they complete their first workout plan in the app.';
+
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadReferralCode();
+    _fetchReferralSettings();
+  }
+
+  Future<void> _fetchReferralSettings() async {
+    final doc =
+        await _firestore.collection('referral_settings').doc('global').get();
+    if (doc.exists) {
+      setState(() {
+        _rewardTitle = doc['reward_title'] ?? _rewardTitle;
+        _rewardDescription =
+            doc['reward_description'] ?? _rewardDescription;
+      });
+    }
+  }
+
+  Future<void> _loadReferralCode() async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    final userDoc = _firestore.collection('users').doc(user.uid);
+    final snapshot = await userDoc.get();
+    if (snapshot.exists && snapshot.data()!['referralCode'] != null) {
+      _referralCode = snapshot['referralCode'];
+    } else {
+      final hash = md5
+          .convert(utf8.encode(user.uid))
+          .toString()
+          .substring(0, 8)
+          .toUpperCase();
+      await userDoc.update({'referralCode': hash});
+      _referralCode = hash;
+    }
+    _referralLink =
+        'https://play.google.com/store/apps/details?id=com.yourfitnessapp&referrer=referral_code%3D$_referralCode';
+    setState(() {});
+  }
+
+  Future<void> _shareLink() async {
+    final message = '''
+Join me at Fitness Hub!
+Use my referral code: $_referralCode
+New members get $_rewardTitle ($_rewardDescription)
+
+$_referralLink
+''';
+    Share.share(message);
+  }
+
+  Future<void> _copyToClipboard(String text, String label) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('$label copied to clipboard')),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Refer & Earn',
+            style: TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1A2B63),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Invite friends to join and earn exciting rewards!',
+            style: TextStyle(fontSize: 16, color: Colors.grey.shade700),
+          ),
+          const SizedBox(height: 24),
+          Card(
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            elevation: 4,
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Reward per Referral',
+                    style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1A2B63)),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    _rewardTitle,
+                    style: const TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1A2B63)),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _rewardDescription,
+                    style:
+                        TextStyle(fontSize: 14, color: Colors.grey.shade700),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          const Text(
+            'Your Referral Details',
+            style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF1A2B63)),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            elevation: 2,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Referral Link',
+                              style:
+                                  TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                            const SizedBox(height: 4),
+                            SelectableText(
+                              _referralLink,
+                              style: const TextStyle(
+                                  color: Colors.blue,
+                                  decoration: TextDecoration.underline),
+                            ),
+                          ],
                         ),
                       ),
+                      IconButton(
+                        icon: const Icon(Icons.copy),
+                        onPressed: () =>
+                            _copyToClipboard(_referralLink, 'Link'),
+                      ),
+                    ],
+                  ),
+                  const Divider(),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Referral Code',
+                              style:
+                                  TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                            const SizedBox(height: 4),
+                            SelectableText(
+                              _referralCode,
+                              style: const TextStyle(
+                                  color: Colors.blue,
+                                  decoration: TextDecoration.underline),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.copy),
+                        onPressed: () =>
+                            _copyToClipboard(_referralCode, 'Code'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.share),
+              label: const Text('Share Link'),
+              onPressed: _shareLink,
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                backgroundColor: const Color(0xFF1A2B63),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class PromotionsTab extends StatefulWidget {
+  const PromotionsTab({super.key});
+  @override
+  State<PromotionsTab> createState() => _PromotionsTabState();
+}
+
+class _PromotionsTabState extends State<PromotionsTab> {
+  final _formKey = GlobalKey<FormState>();
+  final TextEditingController _promoTitleController = TextEditingController();
+  final TextEditingController _promoDescController = TextEditingController();
+  final TextEditingController _promoOfferController = TextEditingController();
+  final TextEditingController _promoCodeController = TextEditingController();
+  DateTime? _startDate;
+  DateTime? _endDate;
+  bool _active = true;
+  bool _loading = false;
+  String? _editPromoId;
+
+  Future<void> _pickDate(BuildContext ctx, bool isStart) async {
+    final now = DateTime.now().toUtc().subtract(const Duration(hours: 5));
+    final picked = await showDatePicker(
+      context: ctx,
+      initialDate: now,
+      firstDate: now.subtract(const Duration(days: 365)),
+      lastDate: now.add(const Duration(days: 365)),
+    );
+    if (picked != null) {
+      setState(() {
+        if (isStart) {
+          _startDate = picked.toUtc();
+        } else {
+          _endDate = picked.toUtc();
+        }
+      });
+    }
+  }
+
+  String _generateId() => FirebaseFirestore.instance.collection('promotions').doc().id;
+
+  Future<void> _savePromotion() async {
+    if (!_formKey.currentState!.validate() || _startDate == null || _endDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please complete all fields')));
+      return;
+    }
+    setState(() => _loading = true);
+    try {
+      final id = _editPromoId ?? _generateId();
+      final data = {
+        'id': id,
+        'title': _promoTitleController.text.trim(),
+        'description': _promoDescController.text.trim(),
+        'offer': _promoOfferController.text.trim(),
+        'code': _promoCodeController.text.trim(),
+        'start': Timestamp.fromDate(_startDate!),
+        'end': Timestamp.fromDate(_endDate!),
+        'active': _active,
+      };
+      final col = FirebaseFirestore.instance.collection('promotions');
+      if (_editPromoId != null) {
+        await col.doc(id).update(data);
+      } else {
+        await col.doc(id).set(data);
+      }
+      _resetForm();
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Promotion saved successfully')));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: ${e.toString()}')));
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
+
+  void _resetForm() {
+    _formKey.currentState!.reset();
+    _promoTitleController.clear();
+    _promoDescController.clear();
+    _promoOfferController.clear();
+    _promoCodeController.clear();
+    _startDate = null;
+    _endDate = null;
+    _active = true;
+    _editPromoId = null;
+  }
+
+  void _loadPromo(Map<String, dynamic> data) {
+    setState(() {
+      _editPromoId = data['id'];
+      _promoTitleController.text = data['title'];
+      _promoDescController.text = data['description'];
+      _promoOfferController.text = data['offer'];
+      _promoCodeController.text = data['code'];
+      _startDate = (data['start'] as Timestamp).toDate().toUtc();
+      _endDate = (data['end'] as Timestamp).toDate().toUtc();
+      _active = data['active'] ?? true;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Card(
+            elevation: 6,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: BorderSide(color: Colors.grey.shade200),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Create Promotion',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF1A2B63),
+                        letterSpacing: 0.5,
+                      ),
                     ),
-                    if (!readAnnouncements.contains(docId))
-                      const Icon(Icons.brightness_1, color: Colors.blue, size: 10),
-                    Icon(_expandedAnnouncements.contains(docId)
-                        ? Icons.expand_less
-                        : Icons.expand_more),
+                    const SizedBox(height: 24),
+                    TextFormField(
+                      controller: _promoTitleController,
+                      decoration: InputDecoration(
+                        labelText: 'Promotion Title',
+                        labelStyle: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontWeight: FontWeight.w500),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                              color: Color(0xFF1A2B63), width: 1.0),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                              color: Color(0xFF1A2B63), width: 2.0),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 14),
+                      ),
+                      validator: (v) =>
+                          v == null || v.isEmpty ? 'Title is required' : null,
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _promoDescController,
+                      decoration: InputDecoration(
+                        labelText: 'Description',
+                        labelStyle: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontWeight: FontWeight.w500),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                              color: Color(0xFF1A2B63), width: 1.0),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                              color: Color(0xFF1A2B63), width: 2.0),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 14),
+                      ),
+                      maxLines: 3,
+                      validator: (v) =>
+                          v == null || v.isEmpty ? 'Description is required' : null,
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _promoOfferController,
+                      decoration: InputDecoration(
+                        labelText: 'Offer (e.g., 20% off)',
+                        labelStyle: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontWeight: FontWeight.w500),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                              color: Color(0xFF1A2B63), width: 1.0),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                              color: Color(0xFF1A2B63), width: 2.0),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 14),
+                      ),
+                      validator: (v) =>
+                          v == null || v.isEmpty ? 'Offer is required' : null,
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _promoCodeController,
+                      decoration: InputDecoration(
+                        labelText: 'Promo Code',
+                        labelStyle: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontWeight: FontWeight.w500),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                              color: Color(0xFF1A2B63), width: 1.0),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                              color: Color(0xFF1A2B63), width: 2.0),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 14),
+                      ),
+                      validator: (v) =>
+                          v == null || v.isEmpty ? 'Promo code is required' : null,
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => _pickDate(context, true),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                              side: const BorderSide(color: Color(0xFF1A2B63)),
+                              backgroundColor: Colors.white,
+                            ),
+                            child: Text(
+                              _startDate == null
+                                  ? 'Start Date'
+                                  : DateFormat.yMMMd().format(_startDate!.toLocal()),
+                              style: const TextStyle(
+                                color: Color(0xFF1A2B63),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => _pickDate(context, false),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                              side: const BorderSide(color: Color(0xFF1A2B63)),
+                              backgroundColor: Colors.white,
+                            ),
+                            child: Text(
+                              _endDate == null
+                                  ? 'End Date'
+                                  : DateFormat.yMMMd().format(_endDate!.toLocal()),
+                              style: const TextStyle(
+                                color: Color(0xFF1A2B63),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    SwitchListTile(
+                      title: const Text(
+                        'Active',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF1A2B63),
+                        ),
+                      ),
+                      value: _active,
+                      onChanged: (v) => setState(() => _active = v),
+                      activeColor: const Color(0xFF1A2B63),
+                      activeTrackColor: Colors.blue.shade100,
+                    ),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _loading ? null : _savePromotion,
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                          elevation: 4,
+                          backgroundColor: const Color(0xFF1A2B63),
+                          foregroundColor: Colors.white,
+                        ),
+                        child: _loading
+                            ? const CircularProgressIndicator(color: Colors.white)
+                            : Text(
+                                _editPromoId != null
+                                    ? 'Update Promotion'
+                                    : 'Create Promotion',
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                      ),
+                    ),
                   ],
                 ),
               ),
-              if (isBookmarked)
-                const Padding(
-                  padding: EdgeInsets.only(top: 4.0),
-                  child: Text("🔖 Bookmarked", style: TextStyle(fontSize: 12)),
-                ),
-              if (_expandedAnnouncements.contains(docId)) ...[
-                const SizedBox(height: 6),
-                Text(data['message'] ?? ''),
-                
-                // Referral-specific content
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.blue[50],
-                    borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+          const SizedBox(height: 24),
+          const Text(
+            'Existing Promotions',
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF1A2B63),
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 16),
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('promotions')
+                .orderBy('start', descending: true)
+                .snapshots(),
+            builder: (context, snap) {
+              if (!snap.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final docs = snap.data!.docs;
+              if (docs.isEmpty) {
+                return const Center(
+                  child: Text(
+                    'No promotions yet',
+                    style: TextStyle(fontSize: 16, color: Colors.grey),
                   ),
+                );
+              }
+              return ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: docs.length,
+                itemBuilder: (ctx, i) {
+                  final d = docs[i];
+                  final m = d.data()! as Map<String, dynamic>;
+                  final start = (m['start'] as Timestamp).toDate().toLocal();
+                  final end = (m['end'] as Timestamp).toDate().toLocal();
+                  return Card(
+                    elevation: 4,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: BorderSide(color: Colors.grey.shade200),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment:
+                                MainAxisAlignment.spaceBetween,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  m['title'],
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 18,
+                                    color: Color(0xFF1A2B63),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            m['description'],
+                            style: TextStyle(
+                              color: Colors.grey.shade700,
+                              fontSize: 14,
+                              height: 1.4,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Offer: ${m['offer']} | Code: ${m['code']}',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: Color(0xFF1A2B63),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Valid: ${DateFormat.yMMMd().format(start)} - ${DateFormat.yMMMd().format(end)}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              IconButton(
+                                icon:
+                                    const Icon(Icons.edit, color: Colors.blue, size: 24),
+                                onPressed: () => _loadPromo(m),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete,
+                                    color: Colors.red, size: 24),
+                                onPressed: () async {
+                                  final confirm = await showDialog<bool>(
+                                    context: context,
+                                    builder: (c) => AlertDialog(
+                                      title: const Text('Delete Promotion'),
+                                      content: const Text(
+                                          'Do you want to delete this promotion?'),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(c, false),
+                                          child: const Text('Cancel'),
+                                        ),
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(c, true),
+                                          child: const Text('Delete'),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                  if (confirm == true) {
+                                    await FirebaseFirestore.instance
+                                        .collection('promotions')
+                                        .doc(m['id'])
+                                        .delete();
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class PostedAnnouncementsScreen extends StatefulWidget {
+  const PostedAnnouncementsScreen({super.key});
+  @override
+  State<PostedAnnouncementsScreen> createState() =>
+      _PostedAnnouncementsScreenState();
+}
+
+class _PostedAnnouncementsScreenState extends State<PostedAnnouncementsScreen> {
+  String _selectedFilter = 'All';
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title:
+            const Text('Posted Announcements', style: TextStyle(color: Colors.white)),
+        backgroundColor: const Color(0xFF1A2B63),
+        iconTheme: const IconThemeData(color: Colors.white),
+        actions: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: DropdownButton<String>(
+              dropdownColor: const Color(0xFF1A2B63),
+              value: _selectedFilter,
+              underline: const SizedBox(),
+              icon: const Icon(Icons.filter_list, color: Colors.white),
+              items: ['All', 'General', 'Birthday', 'Event', 'Important']
+                  .map((cat) => DropdownMenuItem(
+                        value: cat,
+                        child: Text(cat, style: const TextStyle(color: Colors.white)),
+                      ))
+                  .toList(),
+              onChanged: (v) => setState(() => _selectedFilter = v!),
+            ),
+          ),
+          const SizedBox(width: 12),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: const Color(0xFF1A2B63),
+        onPressed: () {
+          Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (c) => const PostAnnouncementScreen()));
+        },
+        child: const Icon(Icons.add, color: Colors.white, size: 28),
+      ),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('announcements')
+            .orderBy('timestamp', descending: true)
+            .snapshots(),
+        builder: (c, snap) {
+          if (snap.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final docs = snap.data?.docs ?? [];
+          final filtered = _selectedFilter == 'All'
+              ? docs
+              : docs.where((d) {
+                  final m = d.data()! as Map<String, dynamic>;
+                  return m['category'] == _selectedFilter;
+                }).toList();
+          if (filtered.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.announcement, size: 64, color: Colors.grey),
+                  const SizedBox(height: 16),
+                  Text(
+                    'No $_selectedFilter announcements found',
+                    style: const TextStyle(fontSize: 18, color: Colors.grey),
+                  ),
+                ],
+              ),
+            );
+          }
+          return ListView.builder(
+            itemCount: filtered.length,
+            padding: const EdgeInsets.all(16),
+            itemBuilder: (ctx, i) {
+              final d = filtered[i];
+              final m = d.data()! as Map<String, dynamic>;
+              final ts = m['timestamp'] as Timestamp?;
+              final dt = ts?.toDate().toLocal() ?? DateTime.now();
+              final newBadge = DateTime.now().difference(dt).inHours < 24;
+              return Card(
+                elevation: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                shape:
+                    RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        "Referral Bonus:",
-                        style: TextStyle(fontWeight: FontWeight.bold),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  m['title'] ?? '',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 18,
+                                    color: Color(0xFF1A2B63),
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'By ${m['trainerName'] ?? 'Unknown'}',
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (newBadge)
+                            Container(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF3B82F6),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: const Text(
+                                'NEW',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
-                      const SizedBox(height: 8),
-                      Text(data['bonusDetails'] ?? 'Earn points for each friend who joins!'),
-                      const SizedBox(height: 8),
-                      if (data['referralCode'] != null)
-                        Text("Your code: ${data['referralCode']}"),
+                      const SizedBox(height: 12),
+                      Text(
+                        m['message'] ?? '',
+                        style: const TextStyle(fontSize: 15, height: 1.4),
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          _buildCategoryChip(m['category'] ?? 'General'),
+                          const Spacer(),
+                          Text(
+                            DateFormat.yMMMd('en_US').add_jm().format(dt),
+                            style: const TextStyle(
+                                fontSize: 12, color: Color(0xFF64748B)),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          ElevatedButton.icon(
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (c) => PostAnnouncementScreen(
+                                    editData: m,
+                                    editDocId: d.id,
+                                  ),
+                                ),
+                              );
+                            },
+                            icon: const Icon(Icons.edit, size: 18),
+                            label: const Text('Edit'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF1A2B63),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 10),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          ElevatedButton.icon(
+                            onPressed: () {
+                              FirebaseFirestore.instance
+                                  .collection('announcements')
+                                  .doc(d.id)
+                                  .delete();
+                            },
+                            icon: const Icon(Icons.delete, size: 18),
+                            label: const Text('Delete'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red.shade700,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 10),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
                   ),
                 ),
-                
-                const Text('Category: Referral'),
-                Text('Time: ${postTime.toLocal().toString().split('.')[0]}'),
-                const Divider(),
-                
-                // Action buttons for referral
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: () => _toggleBookmark(docId),
-                      icon: Icon(isBookmarked ? Icons.bookmark : Icons.bookmark_border),
-                      label: const Text("Bookmark"),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.deepPurple.shade100,
-                      ),
-                    ),
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        _shareReferralOld(data['referralCode'] ?? '');
-                      },
-                      icon: const Icon(Icons.share),
-                      label: const Text("Share Referral"),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.teal.shade100,
-                      ),
-                    ),
-                  ],
-                ),
-              ]
-            ],
-          ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildCategoryChip(String category) {
+    Color backgroundColor;
+    switch (category) {
+      case 'Birthday':
+        backgroundColor = Colors.pink.shade100;
+        break;
+      case 'Event':
+        backgroundColor = Colors.green.shade100;
+        break;
+      case 'Important':
+        backgroundColor = Colors.red.shade100;
+        break;
+      default:
+        backgroundColor = Colors.blue.shade100;
+    }
+
+    return Chip(
+      label: Text(
+        category,
+        style: TextStyle(
+          color: Colors.grey.shade800,
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
         ),
+      ),
+      backgroundColor: backgroundColor,
+      visualDensity: VisualDensity.compact,
+    );
+  }
+}
+
+class ClientPromotionsScreen extends StatelessWidget {
+  const ClientPromotionsScreen({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Promotions', style: TextStyle(color: Colors.white)),
+        backgroundColor: const Color(0xFF1A2B63),
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('promotions')
+            .orderBy('start', descending: true)
+            .snapshots(),
+        builder: (context, snap) {
+          if (!snap.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final docs = snap.data!.docs;
+          if (docs.isEmpty) {
+            return const Center(
+              child: Text(
+                'No promotions available',
+                style: TextStyle(fontSize: 18, color: Colors.grey),
+              ),
+            );
+          }
+          return ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: docs.length,
+            itemBuilder: (ctx, i) {
+              final d = docs[i];
+              final m = d.data()! as Map<String, dynamic>;
+              final start = (m['start'] as Timestamp).toDate().toLocal();
+              final end = (m['end'] as Timestamp).toDate().toLocal();
+              final isActive = m['active'] ?? false;
+              return Card(
+                elevation: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: BorderSide(color: Colors.grey.shade200),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment:
+                            MainAxisAlignment.spaceBetween,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              m['title'],
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF1A2B63),
+                              ),
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                              color:
+                                  isActive ? Colors.green.shade100 : Colors.red.shade100,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              isActive ? 'Active' : 'Inactive',
+                              style: TextStyle(
+                                color: isActive
+                                    ? Colors.green.shade700
+                                    : Colors.red.shade700,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        m['description'],
+                        style: TextStyle(
+                          color: Colors.grey.shade700,
+                          fontSize: 14,
+                          height: 1.4,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Offer: ${m['offer']} | Code: ${m['code']}',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFF1A2B63),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Valid: ${DateFormat.yMMMd().format(start)} - ${DateFormat.yMMMd().format(end)}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: ElevatedButton(
+                          onPressed: isActive ? () {} : null,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF1A2B63),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 10),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: const Text(
+                            'Join Now',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
       ),
     );
   }

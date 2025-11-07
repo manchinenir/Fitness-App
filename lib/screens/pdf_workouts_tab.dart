@@ -11,7 +11,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import 'invoice_review_page.dart';
+// import 'invoice_review_page.dart'; // 👈 removed
 import 'square_checkout.dart';
 
 class PDFWorkoutsTab extends StatefulWidget {
@@ -36,8 +36,8 @@ class _PDFWorkoutsTabState extends State<PDFWorkoutsTab> {
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _pdfWorkoutsSubscription;
 
   // Square payment configuration (same as plans screen)
-  static const String _squareApplicationId = 'sandbox-sq0idb-b_5NuSv1kYCZWkITbVqS4w';
-  static const String _squareLocationId = 'LPSE4AB75KF7G';
+  static const String _squareApplicationId = 'sq0idp-agy7z_bYdVWuflGeopSwCw';
+  static const String _squareLocationId = 'L8S08PC1N6RPJ';
 
   @override
   void initState() {
@@ -84,6 +84,7 @@ class _PDFWorkoutsTabState extends State<PDFWorkoutsTab> {
           .collection('client_subscriptions')
           .where('userId', isEqualTo: userId)
           .where('isActive', isEqualTo: true)
+          .where('type', isEqualTo: 'pdf') // 👈 pdf-only
           .get();
 
       if (subscriptionSnapshot.docs.isNotEmpty) {
@@ -206,15 +207,15 @@ class _PDFWorkoutsTabState extends State<PDFWorkoutsTab> {
       'docId': 'pdf_subscription_monthly',
       'name': 'PDF Workouts Monthly Subscription',
       'category': 'PDF Access',
-      'sessions': 1, // represents 1 month access
-      'price': 9.99, // monthly price (double)
+      'sessions': 1,
+      'price': 9.99,
       'description': 'Unlimited access to all PDF workouts for 30 days',
-      'type': 'subscription'
+      'type': 'subscription',
     };
 
     setState(() => _isProcessingPayment = true);
 
-    final result = await Navigator.of(context).push(
+    await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => SubscriptionPaymentPage(
           plan: subscriptionPlan,
@@ -224,9 +225,9 @@ class _PDFWorkoutsTabState extends State<PDFWorkoutsTab> {
       ),
     );
 
-    if (result == true) {
-      await _completeSubscriptionPurchase();
-    }
+    // 🔁 When user returns from browser, check backend state
+    await _checkSubscriptionStatus();
+
     setState(() => _isProcessingPayment = false);
   }
 
@@ -793,8 +794,6 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
 // ================= Subscription Payment Page =================
 
-// ================= Subscription Payment Page =================
-
 class SubscriptionPaymentPage extends StatefulWidget {
   final Map<String, dynamic> plan;
   final String squareApplicationId;
@@ -826,9 +825,11 @@ class _SubscriptionPaymentPageState extends State<SubscriptionPaymentPage> {
     String? firstName,
     String? lastName,
     String? email,
+    String? userId, // 👈 add this
   }) {
-    // Use 'sandbox' while you are testing with sandbox app/location IDs
-    const env = 'sandbox';
+    const env = 'production';
+
+    final double price = (widget.plan['price'] ?? 0).toDouble();
 
     final params = <String, String>{
       'amountCents': amountCents.toString(),
@@ -838,7 +839,20 @@ class _SubscriptionPaymentPageState extends State<SubscriptionPaymentPage> {
       'apiUrl': '$_apiBase/process-payment',
       'planName': planName,
 
-      // Optional prefill
+      // ✅ send userId so backend can attach to correct user
+      if (userId != null && userId.isNotEmpty) 'userId': userId,
+
+      'planId': widget.plan['docId'] ?? 'pdf_subscription_monthly',
+      'planCategory': widget.plan['category'] ?? 'PDF Access',
+      'sessions': '1',
+      'priceDollars': price.toStringAsFixed(2),
+      'planDescription':
+          widget.plan['description'] as String? ??
+          'Unlimited access to all PDF workouts for 30 days',
+
+      'type': 'pdf',
+      'isPdf': 'true',
+
       if (firstName != null && firstName.isNotEmpty) 'firstName': firstName,
       if (lastName != null && lastName.isNotEmpty) 'lastName': lastName,
       if (email != null && email.isNotEmpty) 'email': email,
@@ -864,7 +878,7 @@ class _SubscriptionPaymentPageState extends State<SubscriptionPaymentPage> {
 
       // Get user info for prefill
       final user = FirebaseAuth.instance.currentUser;
-      final uid = user?.uid ?? 'anon';
+      final uid = user?.uid ?? ''; // 👈 this is what we need
       String email = user?.email ?? '';
       String firstName = '';
       String lastName = '';
@@ -889,16 +903,17 @@ class _SubscriptionPaymentPageState extends State<SubscriptionPaymentPage> {
           email = docEmail;
         }
       } catch (_) {
-        // ignore profile errors, just use whatever we have
+        // ignore profile errors
       }
 
       final url = _buildSubscriptionCheckoutUrl(
         amountCents: amountCents,
-        planName:
-            widget.plan['name'] as String? ?? 'PDF Workouts Monthly Subscription',
+        planName: widget.plan['name'] as String? ??
+            'PDF Workouts Monthly Subscription',
         firstName: firstName,
         lastName: lastName,
         email: email,
+        userId: uid, // ✅ send to checkout.html
       );
 
       final ok = await launchUrl(
@@ -912,43 +927,17 @@ class _SubscriptionPaymentPageState extends State<SubscriptionPaymentPage> {
       if (!mounted) return;
       setState(() => _isProcessingPayment = false);
 
-      // Inform user they must finish payment in browser
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content:
-            Text('Complete the payment in your browser, then return to the app.'),
+        content: Text(
+          'Complete the payment in your browser, then return to the app.',
+        ),
       ));
-
-      // NOTE:
-      // If you want to auto-activate subscription here regardless of real payment:
-      // Navigator.of(context).pop(true);
-      //
-      // For now we just stay on this screen and let the
-      // caller decide how to handle activation (e.g. via a separate button).
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _errorMessage = 'Error starting checkout: $e';
         _isProcessingPayment = false;
       });
-    }
-  }
-
-  Future<void> _openInvoicePage() async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => InvoiceReviewPage(
-          plan: widget.plan,
-          squareApplicationId: widget.squareApplicationId,
-          squareLocationId: widget.squareLocationId,
-          functionsBaseUrl: _apiBase,
-        ),
-      ),
-    );
-
-    if (!mounted) return;
-    if (result == true) {
-      Navigator.of(context).pop(true);
     }
   }
 
@@ -1073,30 +1062,6 @@ class _SubscriptionPaymentPageState extends State<SubscriptionPaymentPage> {
                     'Secure payment via Square (opens in browser)'),
                 trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                 onTap: _isProcessingPayment ? null : _openWebCheckout,
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 8),
-              ),
-            ),
-            Card(
-              elevation: 2,
-              shape:
-                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              child: ListTile(
-                leading: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(Icons.receipt_long, color: Colors.blue),
-                ),
-                title: const Text(
-                  'Invoice',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                subtitle: const Text('Open Square hosted invoice'),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                onTap: _isProcessingPayment ? null : _openInvoicePage,
                 contentPadding: const EdgeInsets.symmetric(
                     horizontal: 16, vertical: 8),
               ),

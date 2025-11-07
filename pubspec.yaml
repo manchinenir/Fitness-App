@@ -1,7 +1,7 @@
 name: flex_facility_app
 description: A gym management app for admins and clients.
 publish_to: 'none'
-version: 1.0.0+10
+version: 1.0.0+12
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
@@ -39,6 +39,7 @@ dependencies:
   uuid: ^4.2.2
   intl: ^0.19.0
   image_picker: ^1.0.4
+  file_picker: ^10.2.0
 
 dev_dependencies:
   flutter_test:
