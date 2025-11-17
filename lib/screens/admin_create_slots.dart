@@ -521,6 +521,91 @@ Kenny Sims Fitness Team
       // Don't throw error - email failure shouldn't break the booking process
     }
   }
+  // 📧 NEW: Email notification to trainer whenever admin updates a slot
+  Future<void> _sendTrainerUpdateEmail({
+    required String slotTime,
+    required DateTime slotDate,
+    required List<Map<String, String>> newBookings,
+    required List<Map<String, String>> cancelledBookings,
+  }) async {
+    try {
+      // 🔧 TODO: Replace with Kenny's actual email
+      const String trainerEmail = 'srihemaparvathaneni@gmail.com';
+
+      final dateStr = DateFormat('EEEE, MMMM d, yyyy').format(slotDate);
+
+      // Plain text body
+      final StringBuffer textBuffer = StringBuffer()
+        ..writeln('Hello Kenny,')
+        ..writeln()
+        ..writeln('The admin updated a training session.')
+        ..writeln('Date: $dateStr')
+        ..writeln('Time: $slotTime')
+        ..writeln();
+
+      if (newBookings.isNotEmpty) {
+        textBuffer.writeln('New bookings:');
+        for (final b in newBookings) {
+          textBuffer.writeln('- ${b['name']} (${b['email']})');
+        }
+        textBuffer.writeln();
+      }
+
+      if (cancelledBookings.isNotEmpty) {
+        textBuffer.writeln('Cancellations:');
+        for (final c in cancelledBookings) {
+          textBuffer.writeln('- ${c['name']} (${c['email']})');
+        }
+        textBuffer.writeln();
+      }
+
+      textBuffer.writeln('— Flex Facility Admin Panel');
+
+      // HTML body
+      final StringBuffer htmlBuffer = StringBuffer()
+        ..writeln('<html><body>')
+        ..writeln('<h2>Admin Updated Training Session</h2>')
+        ..writeln('<p>Date: <strong>$dateStr</strong><br>')
+        ..writeln('Time: <strong>$slotTime</strong></p>');
+
+      if (newBookings.isNotEmpty) {
+        htmlBuffer.writeln('<h3>New bookings:</h3><ul>');
+        for (final b in newBookings) {
+          htmlBuffer.writeln('<li>${b['name']} (${b['email']})</li>');
+        }
+        htmlBuffer.writeln('</ul>');
+      }
+
+      if (cancelledBookings.isNotEmpty) {
+        htmlBuffer.writeln('<h3>Cancellations:</h3><ul>');
+        for (final c in cancelledBookings) {
+          htmlBuffer.writeln('<li>${c['name']} (${c['email']})</li>');
+        }
+        htmlBuffer.writeln('</ul>');
+      }
+
+      htmlBuffer
+        ..writeln('<p>— Flex Facility Admin Panel</p>')
+        ..writeln('</body></html>');
+
+      final emailData = {
+        'to': trainerEmail,
+        'message': {
+          'subject': 'Admin updated training session - $dateStr',
+          'text': textBuffer.toString(),
+          'html': htmlBuffer.toString(),
+        },
+        'type': 'trainer_booking_notification',
+        'timestamp': FieldValue.serverTimestamp(),
+      };
+
+      await FirebaseFirestore.instance.collection('mail').add(emailData);
+      print('✅ Trainer update email queued for $trainerEmail');
+    } catch (e) {
+      print('❌ Error sending trainer update email: $e');
+      // Don’t throw – trainer email failure shouldn’t break admin flow
+    }
+  }
 
   // ✅ FIXED: Enhanced booking dialog with proper session tracking and email notifications
   void _bookForClientDialog(String docId) async {
@@ -929,6 +1014,8 @@ Kenny Sims Fitness Team
                                 'trainer_name': 'Kenny Sims',
                                 'status': 'Confirmed',
                                 'time': slotTime,
+                                'trainer_email': 'srihemaparvathaneni@gmail.com',  // ✅ NEW
+
                                 'date': Timestamp.fromDate(DateTime(
                                   _selectedDay.year,
                                   _selectedDay.month,
@@ -972,6 +1059,32 @@ Kenny Sims Fitness Team
                                   action: 'booked',
                                 );
                               }
+// 📧 NEW: Trainer summary email (bookings + cancellations)
+                              final trainerNewBookings = newClientsData
+                                  .map<Map<String, String>>((client) => {
+                                        'name': client['name'] as String? ?? '',
+                                        'email': client['email'] as String? ?? '',
+                                      })
+                                  .toList();
+
+                              final trainerCancelled = clientsToRemove
+                                  .map<Map<String, String>>((client) => {
+                                        'name': client['name'] as String? ?? '',
+                                        'email': client['email'] as String? ?? '',
+                                      })
+                                  .toList();
+
+                              if (trainerNewBookings.isNotEmpty ||
+                                  trainerCancelled.isNotEmpty) {
+                                await _sendTrainerUpdateEmail(
+                                  slotTime: slotTime,
+                                  slotDate: _selectedDay,
+                                  newBookings: trainerNewBookings,
+                                  cancelledBookings: trainerCancelled,
+                                );
+                              }
+
+
                             } catch (emailError) {
                               print('⚠️ Email notifications partially failed: $emailError');
                               // Don't show error to user - email failure shouldn't affect booking
@@ -1239,21 +1352,49 @@ Kenny Sims Fitness Team
                     });
 
                     // ✅ SEND CANCELLATION EMAIL NOTIFICATIONS
+                                       // ✅ SEND CANCELLATION EMAIL NOTIFICATIONS
                     try {
                       final slotTime = docId.split('|')[1];
+
+                      // For trainer summary
+                      final List<Map<String, String>> trainerCancelled = [];
+
                       for (var clientId in selectedClientIds) {
                         final clientIndex = bookedUids.indexOf(clientId);
-                        if (clientIndex != -1 && clientIndex < bookedNames.length && clientIndex < bookedEmails.length) {
+                        if (clientIndex != -1 &&
+                            clientIndex < bookedNames.length &&
+                            clientIndex < bookedEmails.length) {
+                          final name = bookedNames[clientIndex];
+                          final email = bookedEmails[clientIndex];
+
+                          // Client email
                           await _sendBookingEmailNotification(
-                            clientEmail: bookedEmails[clientIndex],
-                            clientName: bookedNames[clientIndex],
+                            clientEmail: email,
+                            clientName: name,
                             slotTime: slotTime,
                             slotDate: _selectedDay,
                             action: 'cancelled',
                           );
+
+                          // Add to trainer summary
+                          trainerCancelled.add({
+                            'name': name,
+                            'email': email,
+                          });
                         }
                       }
+
+                      // 📧 NEW: Trainer summary email (only cancellations here)
+                      if (trainerCancelled.isNotEmpty) {
+                        await _sendTrainerUpdateEmail(
+                          slotTime: slotTime,
+                          slotDate: _selectedDay,
+                          newBookings: const <Map<String, String>>[],
+                          cancelledBookings: trainerCancelled,
+                        );
+                      }
                     } catch (emailError) {
+
                       print('⚠️ Email notifications partially failed: $emailError');
                       // Don't show error to user - email failure shouldn't affect cancellation
                     }

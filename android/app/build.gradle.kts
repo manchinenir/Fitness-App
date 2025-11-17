@@ -28,8 +28,8 @@ android {
         applicationId = "com.flexfacility.app"
         minSdk = maxOf(28, flutter.minSdkVersion)
         targetSdk = flutter.targetSdkVersion
-        versionCode = 12
-        versionName = "1.0.11"
+        versionCode = 14
+        versionName = "1.0.13"
     }
 
     compileOptions {

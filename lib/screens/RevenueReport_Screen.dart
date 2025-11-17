@@ -126,97 +126,93 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
 
   Future<void> _calculateTotalSummary() async {
     if (!mounted) return;
-    
+
     setState(() {
       isLoading = true;
     });
 
     try {
       double planRevenue = 0.0;
-      int activePlanCount = 0;
+      double subscriptionRevenue = 0.0;
       int slots = 0;
-      double subRevenue = 0.0;
-      int activeSubscriptionCount = 0;
 
       final yearStart = DateTime.utc(selectedYear, 1, 1);
       final yearEnd = DateTime.utc(selectedYear + 1, 1, 1);
 
-      final snapshot = await FirebaseFirestore.instance
+      // ✅ Track ALL unique plans purchased during the year (regardless of current status)
+      Set<String> uniquePlanNames = {};
+
+      // ✅ Fetch all completed or COMPLETED plans for the selected year
+      final planSnapshot = await FirebaseFirestore.instance
           .collection('client_purchases')
-          .where('paymentStatus', isEqualTo: 'completed')
+          .where('paymentStatus', whereIn: ['completed', 'COMPLETED'])
           .get();
 
-      for (var doc in snapshot.docs) {
+      for (var doc in planSnapshot.docs) {
         final data = doc.data();
-        
-        // Get effective date - completedDate if available, else createdAt
-        DateTime effectiveDate;
+
+        // Determine effective purchase date
+        DateTime? effectiveDate;
         if (data['completedDate'] != null) {
           effectiveDate = (data['completedDate'] as Timestamp).toDate();
         } else if (data['createdAt'] != null) {
           effectiveDate = (data['createdAt'] as Timestamp).toDate();
-        } else {
-          effectiveDate = (data['purchaseDate'] as Timestamp).toDate();
+        } else if (data['purchaseDate'] != null) {
+          final v = data['purchaseDate'];
+          if (v is Timestamp) {
+            effectiveDate = v.toDate();
+          } else {
+            try {
+              effectiveDate = DateTime.parse(v.toString());
+            } catch (_) {}
+          }
         }
-        
-        // Check if the effective date is within the selected year
-        if (effectiveDate.year != selectedYear) continue;
-        
-        final planCategory = (data['Plan_Category'] ?? data['planName'] ?? '') as String;
-        final status = data['status']?.toString().toLowerCase() ?? '';
 
-        final price = (data['price'] ?? data['plan_price'] ?? 0) as num;
-        planRevenue += price.toDouble();
+        // Skip if no date or not within selected year
+        if (effectiveDate == null || effectiveDate.year != selectedYear) continue;
+
+        // Normalize and count unique plan names (always add, never remove)
+        final planName = (data['Plan_Category'] ?? data['planName'] ?? '').toString().trim();
+        if (planName.isEmpty) continue;
         
-        if (planCategory.trim().isNotEmpty && (status == 'active' || status == 'enabled')) {
-          activePlanCount++;
-        }
+        // ✅ ALWAYS add to unique plans - never remove even if cancelled/completed
+        uniquePlanNames.add(planName.toLowerCase());
+
+        // Add plan revenue (only for completed payments)
+        final num price = data['price'] ?? data['plan_price'] ?? 0;
+        planRevenue += price.toDouble();
       }
 
+      // ✅ Fetch completed subscriptions for revenue
       final subSnapshot = await FirebaseFirestore.instance
           .collection('client_subscriptions')
-          .where('paymentStatus', isEqualTo: 'completed')
+          .where('paymentStatus', whereIn: ['completed', 'COMPLETED'])
           .get();
-      
-      final nowUtc = DateTime.now().toUtc();
+
       for (var doc in subSnapshot.docs) {
         final data = doc.data();
-        
-        // Get effective date - createdAt
-        DateTime effectiveDate;
+
+        DateTime? effectiveDate;
         if (data['createdAt'] != null) {
           effectiveDate = (data['createdAt'] as Timestamp).toDate();
-        } else {
-          effectiveDate = DateTime.parse(data['purchaseDate'] as String);
-        }
-        
-        // Check if the effective date is within the selected year
-        if (effectiveDate.year != selectedYear) continue;
-
-        final bool isActive = data['isActive'] ?? false;
-        final String statusStr = (data['status'] ?? '').toString().toLowerCase();
-        
-        DateTime? endDateUtc;
-        final dynamic endDateRaw = data['endDate'];
-        if (endDateRaw is String) {
-          endDateUtc = DateTime.parse(endDateRaw);
-        } else if (endDateRaw is Timestamp) {
-          endDateUtc = endDateRaw.toDate();
+        } else if (data['purchaseDate'] != null) {
+          final v = data['purchaseDate'];
+          if (v is Timestamp) {
+            effectiveDate = v.toDate();
+          } else {
+            try {
+              effectiveDate = DateTime.parse(v.toString());
+            } catch (_) {}
+          }
         }
 
-        final num priceNum = data['price'] ?? 0;
-        subRevenue += priceNum.toDouble();
-        
-        if (isActive && 
-            statusStr == 'active' && 
-            endDateUtc != null && 
-            nowUtc.isBefore(endDateUtc)) {
-          activeSubscriptionCount++;
-        }
+        if (effectiveDate == null || effectiveDate.year != selectedYear) continue;
+
+        final num price = data['price'] ?? 0;
+        subscriptionRevenue += price.toDouble();
       }
 
-      double totalRev = planRevenue + subRevenue;
-
+      // ✅ Fetch total booked slots (not cancelled)
       final slotSnapshot = await FirebaseFirestore.instance
           .collection('trainer_slots')
           .where('date', isGreaterThanOrEqualTo: yearStart)
@@ -237,10 +233,12 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
         }
       }
 
+      final totalRevenueCombined = planRevenue + subscriptionRevenue;
+
       if (!mounted) return;
       setState(() {
-        totalRevenue = totalRev;
-        totalPlans = activePlanCount + activeSubscriptionCount;
+        totalPlans = uniquePlanNames.length; // ✅ Unique plan names only (never decreases)
+        totalRevenue = totalRevenueCombined; // ✅ Plans + Subscriptions
         totalSlots = slots;
         isLoading = false;
       });
@@ -251,6 +249,44 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
       });
     }
   }
+
+  bool _isWithinDateRange(DateTime now, dynamic start, dynamic end) {
+    DateTime? s, e;
+    if (start is Timestamp) s = start.toDate();
+    if (end is Timestamp) e = end.toDate();
+    final afterStart = (s == null) || !now.isBefore(s);
+    final beforeEnd  = (e == null) || !now.isAfter(e);
+    return afterStart && beforeEnd;
+  }
+
+  bool _isPlanActive(Map<String, dynamic> data) {
+    final status = (data['status'] ?? '').toString().toLowerCase().trim();
+    if (status != 'active') return false;
+
+    final now = DateTime.now();
+    return _isWithinDateRange(now, data['startDate'], data['endDate']);
+  }
+
+  bool _isSubscriptionActive(Map<String, dynamic> data) {
+    final status = (data['status'] ?? '').toString().toLowerCase().trim();
+    if (status != 'active') return false;
+
+    final isActiveFlag = data['isActive'] == true;
+    if (!isActiveFlag) return false;
+
+    final endDate = data['endDate'];
+    if (endDate == null) return true;
+
+    DateTime? end;
+    if (endDate is Timestamp) {
+      end = endDate.toDate();
+    } else if (endDate is String) {
+      end = DateTime.tryParse(endDate);
+    }
+
+    return end == null || end.isAfter(DateTime.now());
+  }
+
 
   Future<void> _exportPdfReport() async {
     setState(() {
@@ -269,15 +305,13 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
 
     final pdf = pw.Document();
     final reportYear = selectedYear;
-    final planCountByName = <String, int>{};
-    final categoryOriginal = <String, String>{};
-    int yearlyPlans = 0;
-    int yearlyActivePlans = 0;
-    double yearlyPlanRevenue = 0.0;
-    double yearlySubRevenue = 0.0;
-    int totalActiveSubs = 0;
-    int totalSlots = 0;
-    final monthlyData = <String, Map<String, dynamic>>{};
+    
+    // Add these variables for detailed data
+    final Map<String, int> monthlyPlanCounts = {};
+    final Map<String, double> monthlyPlanRevenue = {};
+    final Map<String, int> monthlySubCounts = {};
+    final Map<String, double> monthlySubRevenue = {};
+    final Map<String, int> monthlySlots = {};
     final List<Map<String, dynamic>> yearPlanDetails = [];
     final List<Map<String, dynamic>> yearSlotDetails = [];
     final List<Map<String, dynamic>> yearSubscriptionDetails = [];
@@ -287,202 +321,258 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
     final Set<String> yearSubClientIds = {};
 
     try {
-      final subSnapshot = await FirebaseFirestore.instance
-          .collection('client_subscriptions')
-          .where('paymentStatus', isEqualTo: 'completed')
+      // Initialize monthly data
+      for (var month in monthMap.keys) {
+        monthlyPlanCounts[month] = 0;
+        monthlyPlanRevenue[month] = 0.0;
+        monthlySubCounts[month] = 0;
+        monthlySubRevenue[month] = 0.0;
+        monthlySlots[month] = 0;
+      }
+
+      // ✅ FIXED: Count ALL purchased plans (not unique)
+      double yearlyPlanRevenue = 0.0;
+      int totalPlanPurchases = 0; // Count ALL plans purchased in the year
+      int activePlans = 0;        // Count only active (non-cancelled) plans
+      
+      double yearlySubRevenue = 0.0;
+      int totalSubPurchases = 0;  // Count ALL subscription purchases
+      int activeSubscriptions = 0; // Count only active subscriptions
+      int totalSlots = 0;
+
+      // Process plans for the selected year
+      final planSnapshot = await FirebaseFirestore.instance
+          .collection('client_purchases')
+          .where('paymentStatus', whereIn: ['completed', 'COMPLETED'])
           .get();
-      
-      final List<Map<String, dynamic>> allSubs = subSnapshot.docs.map((doc) {
+
+      for (var doc in planSnapshot.docs) {
         final data = doc.data();
-        data['docId'] = doc.id;
-        return data;
-      }).toList();
-      
-      final nowUtc = DateTime.now().toUtc();
 
-      for (var entry in monthMap.entries) {
-        final monthName = entry.key;
-        final monthIndex = entry.value;
-        final monthStart = DateTime.utc(reportYear, monthIndex, 1);
-        final monthEnd = monthIndex < 12 ? DateTime.utc(reportYear, monthIndex + 1, 1) : DateTime.utc(reportYear + 1, 1, 1);
-
-        final planSnapshot = await FirebaseFirestore.instance
-            .collection('client_purchases')
-            .where('paymentStatus', isEqualTo: 'completed')
-            .get();
-
-        final slotSnapshot = await FirebaseFirestore.instance
-            .collection('trainer_slots')
-            .where('date', isGreaterThanOrEqualTo: monthStart)
-            .where('date', isLessThan: monthEnd)
-            .get();
-
-        double monthPlanRevenue = 0.0;
-        int monthPlans = 0;
-        int monthActivePlans = 0;
-        int monthSlots = 0;
-        Set<String> monthUniquePlans = {};
-        double monthSubRevenue = 0.0;
-        int monthActiveSubs = 0;
-
-        for (var doc in planSnapshot.docs) {
-          final data = doc.data();
-          
-          // Get effective date - completedDate if available, else createdAt
-          DateTime effectiveDate;
-          if (data['completedDate'] != null) {
-            effectiveDate = (data['completedDate'] as Timestamp).toDate();
-          } else if (data['createdAt'] != null) {
-            effectiveDate = (data['createdAt'] as Timestamp).toDate();
+        // Determine effective date
+        DateTime? effectiveDate;
+        if (data['completedDate'] != null) {
+          effectiveDate = (data['completedDate'] as Timestamp).toDate();
+        } else if (data['createdAt'] != null) {
+          effectiveDate = (data['createdAt'] as Timestamp).toDate();
+        } else if (data['purchaseDate'] != null) {
+          final v = data['purchaseDate'];
+          if (v is Timestamp) {
+            effectiveDate = v.toDate();
           } else {
-            effectiveDate = (data['purchaseDate'] as Timestamp).toDate();
+            try {
+              effectiveDate = DateTime.parse(v.toString());
+            } catch (_) {}
           }
-          
-          // Check if the effective date is within the selected month
-          if (effectiveDate.month != monthIndex || effectiveDate.year != reportYear) continue;
-          
-          final status = data['status']?.toString().toLowerCase() ?? '';
-          final planCategory = (data['Plan_Category'] ?? data['planName'] ?? '') as String;
-          final normCategory = planCategory.trim().toLowerCase();
-          final clientId = data['clientId'] ?? data['client_id'] ?? data['userId'] ?? data['user_id'] ?? data['uid'] ?? '';
-          final cancelledDate = data['cancelledDate'] as Timestamp?;
+        }
 
-          final price = (data['price'] ?? data['plan_price'] ?? 0) as num;
-          monthPlanRevenue += price.toDouble();
-          yearClientIds.add(clientId);
+        if (effectiveDate == null || effectiveDate.year != reportYear) continue;
+
+        final num priceNum = data['price'] ?? data['plan_price'] ?? 0;
+        final planCategory = (data['Plan_Category'] ?? data['planName'] ?? '') as String;
+        final clientId = data['clientId'] ?? data['client_id'] ?? data['userId'] ?? data['user_id'] ?? data['uid'] ?? '';
+        final status = (data['status'] ?? '').toString().toLowerCase();
+        final cancelledDate = data['cancelledDate'] as Timestamp?;
+        
+        // Get month name for monthly breakdown
+        final monthName = DateFormat('MMM').format(effectiveDate).toUpperCase();
+
+        // ✅ COUNT ALL PURCHASES (not unique)
+        totalPlanPurchases++;
+        yearlyPlanRevenue += priceNum.toDouble();
+        
+        // Update monthly counts
+        monthlyPlanCounts[monthName] = (monthlyPlanCounts[monthName] ?? 0) + 1;
+        monthlyPlanRevenue[monthName] = (monthlyPlanRevenue[monthName] ?? 0) + priceNum.toDouble();
+
+        // Active means not cancelled and within date range
+        if (_isPlanActive(data)) {
+          activePlans++;
+        }
+
+        // Add to detailed data
+        if (clientId.isNotEmpty) yearClientIds.add(clientId);
+        
+        // In the plan processing loop, modify the yearPlanDetails.add():
+        final completedDateTs = data['completedDate'] as Timestamp?;
+          final cancelledDateTs = data['cancelledDate'] as Timestamp?;
+
           yearPlanDetails.add({
             'month': monthName,
             'plan': planCategory,
             'clientId': clientId,
-            'amount': price,
-            'date': effectiveDate,
+            'amount': priceNum,
+
+            // 👉 IMPORTANT: use createdAt only for purchase date, NOT for completed/cancel date
+            'date': (data['createdAt'] as Timestamp).toDate(),
+
             'status': status,
             'paymentStatus': 'completed',
-            'cancelledDate': cancelledDate,
+
+            // 👉 These 2 fields are used later by PDF
+            'cancelledDate': cancelledDateTs,
+            'completedDate': completedDateTs,
           });
-          
-          if (planCategory.trim().isNotEmpty && (status == 'active' || status == 'enabled')) {
-            monthActivePlans++;
-            monthUniquePlans.add(normCategory);
-            if (!categoryOriginal.containsKey(normCategory)) {
-              categoryOriginal[normCategory] = planCategory.trim();
-            }
-            planCountByName[normCategory] = (planCountByName[normCategory] ?? 0) + 1;
-          }
-        }
-
-        monthPlans = monthUniquePlans.length;
-
-        for (var subData in allSubs) {
-          // Get effective date - createdAt
-          DateTime effectiveDate;
-          if (subData['createdAt'] != null) {
-            effectiveDate = (subData['createdAt'] as Timestamp).toDate();
-          } else {
-            effectiveDate = DateTime.parse(subData['purchaseDate'] as String);
-          }
-          
-          // Check if the effective date is within the selected month
-          if (effectiveDate.month != monthIndex || effectiveDate.year != reportYear) continue;
-
-          final bool isActive = subData['isActive'] ?? false;
-          final String statusStr = (subData['status'] ?? '').toString().toLowerCase();
-          
-          DateTime? endDateUtc;
-          final dynamic endDateRaw = subData['endDate'];
-          if (endDateRaw is String) {
-            endDateUtc = DateTime.parse(endDateRaw);
-          } else if (endDateRaw is Timestamp) {
-            endDateUtc = endDateRaw.toDate();
-          }
-
-          final String userId = subData['userId'] ?? '';
-          final num priceNum = subData['price'] ?? 0;
-          monthSubRevenue += priceNum.toDouble();
-          yearSubClientIds.add(userId);
-          yearSubscriptionDetails.add({
-            'month': monthName,
-            'plan': subData['planName'] ?? 'Subscription',
-            'clientId': userId,
-            'amount': priceNum,
-            'date': effectiveDate,
-            'status': statusStr,
-            'paymentStatus': 'completed',
-            'cancelledDate': null,
-          });
-          
-          if (isActive && 
-              statusStr == 'active' && 
-              endDateUtc != null && 
-              nowUtc.isBefore(endDateUtc)) {
-            monthActiveSubs++;
-          }
-        }
-
-        yearlyPlanRevenue += monthPlanRevenue;
-        yearlySubRevenue += monthSubRevenue;
-        yearlyActivePlans += monthActivePlans;
-        totalActiveSubs += monthActiveSubs;
-
-        for (var doc in slotSnapshot.docs) {
-          final data = doc.data();
-          final booked = List<String>.from(data['booked_by'] ?? []);
-          if (booked.isEmpty) continue;
-
-          DateTime slotDate;
-          final dateField = data['date'];
-          if (dateField is Timestamp) {
-            slotDate = dateField.toDate();
-          } else {
-            try {
-              slotDate = DateFormat('yyyy-MM-dd').parse(dateField ?? '');
-            } catch (_) {
-              continue;
-            }
-          }
-
-          final formattedDate = DateFormat('MMMM d, yyyy').format(slotDate);
-          final time = data['time'] ?? '';
-          final trainerId = data['trainer_id'] ?? data['trainerId'] ?? '';
-          final trainerName = data['trainer_name'] ?? 'Unknown Trainer';
-          if (trainerId.isNotEmpty) yearTrainerIds.add(trainerId);
-
-          final statusByUser = Map<String, dynamic>.from(data['status_by_user'] ?? {});
-          for (String clientId in booked) {
-            String status = statusByUser[clientId] ?? data['status'] ?? 'Confirmed';
-            if (clientId.isNotEmpty) yearSlotClientIds.add(clientId);
-            yearSlotDetails.add({
-              'month': monthName,
-              'date': formattedDate,
-              'time': time,
-              'clientId': clientId,
-              'trainerId': trainerId,
-              'trainer': trainerName,
-              'status': status,
-            });
-            if (status.toLowerCase() != 'cancelled') {
-              monthSlots++;
-            }
-          }
-        }
-
-        monthlyData[monthName] = {
-          'plans': monthActivePlans,
-          'planRevenue': monthPlanRevenue,
-          'subRevenue': monthSubRevenue,
-          'slots': monthSlots,
-        };
-
-        totalSlots += monthSlots;
       }
 
-      yearlyPlans = yearlyActivePlans + totalActiveSubs;
+      // Process subscriptions for the selected year - FIXED STATUS DETECTION
+      final subSnapshot = await FirebaseFirestore.instance
+          .collection('client_subscriptions')
+          .where('paymentStatus', whereIn: ['completed', 'COMPLETED'])
+          .get();
 
+      for (var doc in subSnapshot.docs) {
+        final data = doc.data();
+
+        // Determine subscription start date
+        DateTime? effectiveDate;
+        if (data['createdAt'] != null) {
+          effectiveDate = (data['createdAt'] as Timestamp).toDate();
+        } else if (data['purchaseDate'] != null) {
+          final v = data['purchaseDate'];
+          if (v is Timestamp) {
+            effectiveDate = v.toDate();
+          } else {
+            try {
+              effectiveDate = DateTime.parse(v.toString());
+            } catch (_) {}
+          }
+        }
+
+        if (effectiveDate == null || effectiveDate.year != reportYear) continue;
+
+        final num priceNum = data['price'] ?? 0;
+        final String userId = data['userId'] ?? '';
+        final String planName = data['planName'] ?? 'Unknown Subscription';
+        final String statusRaw = (data['status'] ?? '').toString().toLowerCase();
+        final bool isActiveNow = data['isActive'] == true;
+        final Timestamp? cancelledDate = data['cancelledDate'] as Timestamp?;
+        final dynamic endDate = data['endDate'];
+
+        final monthName = DateFormat('MMM').format(effectiveDate).toUpperCase();
+
+        // ✅ Count all completed subscriptions for totals
+        totalSubPurchases++;
+        yearlySubRevenue += priceNum.toDouble();
+
+        monthlySubCounts[monthName] = (monthlySubCounts[monthName] ?? 0) + 1;
+        monthlySubRevenue[monthName] = (monthlySubRevenue[monthName] ?? 0) + priceNum.toDouble();
+
+        // ✅ FIXED: Proper subscription status detection
+        String actualStatus = statusRaw;
+        
+        // Check if subscription is expired
+        bool isExpired = false;
+        if (endDate != null) {
+          DateTime? end;
+          if (endDate is Timestamp) {
+            end = endDate.toDate();
+          } else {
+            try {
+              end = DateTime.parse(endDate.toString());
+            } catch (_) {}
+          }
+          if (end != null && end.isBefore(DateTime.now())) {
+            isExpired = true;
+            actualStatus = 'expired';
+          }
+        }
+
+        // Check if subscription is cancelled
+        final bool isCancelled = statusRaw == 'cancelled' || cancelledDate != null;
+        if (isCancelled) {
+          actualStatus = 'cancelled';
+        }
+
+        // ✅ FIXED: Determine if subscription is actually active
+        bool isActuallyActive = isActiveNow && 
+                              statusRaw == 'active' && 
+                              !isCancelled && 
+                              !isExpired;
+
+        if (isActuallyActive) {
+          activeSubscriptions++;
+        }
+
+        if (userId.isNotEmpty) yearSubClientIds.add(userId);
+
+        yearSubscriptionDetails.add({
+          'month': monthName,
+          'plan': planName,
+          'clientId': userId,
+          'amount': priceNum,
+          'date': effectiveDate,
+          'status': actualStatus, // Use the corrected status
+          'paymentStatus': 'completed',
+          'cancelledDate': cancelledDate,
+          'endDate': endDate,
+        });
+      }
+
+      // Process slots for the selected year
+      final yearStart = DateTime.utc(reportYear, 1, 1);
+      final yearEnd = DateTime.utc(reportYear + 1, 1, 1);
+      
+      final slotSnapshot = await FirebaseFirestore.instance
+          .collection('trainer_slots')
+          .where('date', isGreaterThanOrEqualTo: yearStart)
+          .where('date', isLessThan: yearEnd)
+          .get();
+
+      for (var doc in slotSnapshot.docs) {
+        final data = doc.data();
+        final booked = List<String>.from(data['booked_by'] ?? []);
+        if (booked.isEmpty) continue;
+
+        DateTime slotDate;
+        final dateField = data['date'];
+        if (dateField is Timestamp) {
+          slotDate = dateField.toDate();
+        } else {
+          try {
+            slotDate = DateFormat('yyyy-MM-dd').parse(dateField ?? '');
+          } catch (_) {
+            continue;
+          }
+        }
+
+        final monthName = DateFormat('MMM').format(slotDate).toUpperCase();
+        final formattedDate = DateFormat('MMMM d, yyyy').format(slotDate);
+        final time = data['time'] ?? '';
+        final trainerId = data['trainer_id'] ?? data['trainerId'] ?? '';
+        final trainerName = data['trainer_name'] ?? 'Unknown Trainer';
+        if (trainerId.isNotEmpty) yearTrainerIds.add(trainerId);
+
+        final statusByUser = Map<String, dynamic>.from(data['status_by_user'] ?? {});
+        for (String clientId in booked) {
+          String status = statusByUser[clientId] ?? data['status'] ?? 'Confirmed';
+          if (clientId.isNotEmpty) yearSlotClientIds.add(clientId);
+          
+          yearSlotDetails.add({
+            'month': monthName,
+            'date': formattedDate,
+            'time': time,
+            'clientId': clientId,
+            'trainerId': trainerId,
+            'trainer': trainerName,
+            'status': status,
+          });
+          
+          if (status.toLowerCase() != 'cancelled') {
+            totalSlots++;
+            monthlySlots[monthName] = (monthlySlots[monthName] ?? 0) + 1;
+          }
+        }
+      }
+
+      final totalRevenueYearly = yearlyPlanRevenue + yearlySubRevenue;
+      final totalPlansAndSubs = totalPlanPurchases + totalSubPurchases;
+
+      // Fetch user names for detailed reports
       final Map<String, String> userNames = await _fetchUserNames(yearClientIds);
       for (var detail in yearPlanDetails) {
         detail['client'] = userNames[detail['clientId']] ?? 'Unknown Client';
       }
-      yearPlanDetails.sort((a, b) => (b['date'] as DateTime).compareTo(a['date'] as DateTime));
 
       final Map<String, String> slotClientNames = await _fetchUserNames(yearSlotClientIds);
       final Map<String, String> trainerNames = await _fetchUserNames(yearTrainerIds);
@@ -490,6 +580,15 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
         detail['client'] = slotClientNames[detail['clientId']] ?? 'Unknown Client';
         detail['trainer'] = trainerNames[detail['trainerId']] ?? detail['trainer'];
       }
+
+      final Map<String, String> subUserNames = await _fetchUserNames(yearSubClientIds);
+      for (var detail in yearSubscriptionDetails) {
+        detail['client'] = subUserNames[detail['clientId']] ?? 'Unknown Client';
+      }
+
+      // Sort details
+      yearPlanDetails.sort((a, b) => (b['date'] as DateTime).compareTo(a['date'] as DateTime));
+      yearSubscriptionDetails.sort((a, b) => (b['date'] as DateTime).compareTo(a['date'] as DateTime));
       yearSlotDetails.sort((a, b) {
         final dateCompare = DateFormat('MMMM d, yyyy')
             .parse(a['date'])
@@ -498,15 +597,7 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
         return a['time'].compareTo(b['time']);
       });
 
-      final Map<String, String> subUserNames = await _fetchUserNames(yearSubClientIds);
-      for (var detail in yearSubscriptionDetails) {
-        detail['client'] = subUserNames[detail['clientId']] ?? 'Unknown Client';
-      }
-      yearSubscriptionDetails.sort((a, b) => (b['date'] as DateTime).compareTo(a['date'] as DateTime));
-
-      final topPlans = planCountByName.entries.toList()
-        ..sort((a, b) => b.value.compareTo(a.value));
-
+      // ✅ FIXED: PDF generation with correct counts and proper column widths
       pdf.addPage(
         pw.MultiPage(
           pageFormat: PdfPageFormat.a4.copyWith(marginTop: 1.5 * PdfPageFormat.cm),
@@ -518,10 +609,7 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
               ),
             ),
             pw.SizedBox(height: 20),
-            pw.Text(
-              "Year: $reportYear",
-              style: const pw.TextStyle(fontSize: 22),
-            ),
+            pw.Text("Year: $reportYear", style: const pw.TextStyle(fontSize: 22)),
             pw.Text(
               "Generated on: ${DateFormat('MMMM d, yyyy').format(DateTime.now())}",
               style: const pw.TextStyle(fontSize: 22),
@@ -533,15 +621,23 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
             ),
             pw.SizedBox(height: 15),
             pw.Bullet(
-              text: "Total Active Plans: $yearlyActivePlans",
+              text: "Total Plan Purchases: $totalPlanPurchases",
               style: const pw.TextStyle(fontSize: 22),
             ),
             pw.Bullet(
-              text: "Total Active Subscriptions: $totalActiveSubs",
+              text: "Active Plans: $activePlans",
               style: const pw.TextStyle(fontSize: 22),
             ),
             pw.Bullet(
-              text: "Total Plans & Subscriptions: $yearlyPlans",
+              text: "Total Subscription Purchases: $totalSubPurchases",
+              style: const pw.TextStyle(fontSize: 22),
+            ),
+            pw.Bullet(
+              text: "Active Subscriptions: $activeSubscriptions",
+              style: const pw.TextStyle(fontSize: 22),
+            ),
+            pw.Bullet(
+              text: "Total Plans & Subscriptions: $totalPlansAndSubs",
               style: const pw.TextStyle(fontSize: 22),
             ),
             pw.Bullet(
@@ -553,7 +649,7 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
               style: const pw.TextStyle(fontSize: 22),
             ),
             pw.Bullet(
-              text: "Total Revenue: \$${(yearlyPlanRevenue + yearlySubRevenue).toStringAsFixed(2)}",
+              text: "Total Revenue: \$${totalRevenueYearly.toStringAsFixed(2)}",
               style: const pw.TextStyle(fontSize: 22),
             ),
             pw.Bullet(
@@ -567,29 +663,36 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
             ),
             pw.SizedBox(height: 15),
             pw.Table.fromTextArray(
-              headers: ['Month', 'Active Plans', 'Slots', 'Plan Revenue', 'Subscription Revenue', 'Total Revenue'],
+              headers: ['Month', 'Plan Purchases', 'Subscription Purchases', 'Slots', 'Plan Revenue', 'Subscription Revenue', 'Total Revenue'],
               headerStyle: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold),
               cellStyle: const pw.TextStyle(fontSize: 16),
               cellAlignment: pw.Alignment.center,
               headerAlignment: pw.Alignment.center,
               border: pw.TableBorder.all(color: PdfColors.black, width: 1),
               columnWidths: {
-                0: const pw.FixedColumnWidth(80),
+                0: const pw.FixedColumnWidth(70),
                 1: const pw.FixedColumnWidth(100),
-                2: const pw.FixedColumnWidth(60),
-                3: const pw.FixedColumnWidth(90),
-                4: const pw.FixedColumnWidth(110),
-                5: const pw.FixedColumnWidth(100),
+                2: const pw.FixedColumnWidth(130),
+                3: const pw.FixedColumnWidth(70),
+                4: const pw.FixedColumnWidth(100),
+                5: const pw.FixedColumnWidth(120),
+                6: const pw.FixedColumnWidth(100),
               },
               data: monthMap.keys.map((month) {
-                final m = monthlyData[month]!;
-                final totalMonthRev = (m['planRevenue'] as double) + (m['subRevenue'] as double);
+                final planCount = monthlyPlanCounts[month] ?? 0;
+                final subCount = monthlySubCounts[month] ?? 0;
+                final slotsCount = monthlySlots[month] ?? 0;
+                final planRev = monthlyPlanRevenue[month] ?? 0.0;
+                final subRev = monthlySubRevenue[month] ?? 0.0;
+                final totalMonthRev = planRev + subRev;
+                
                 return [
                   month,
-                  m['plans'].toString(),
-                  m['slots'].toString(),
-                  '\$${(m['planRevenue'] as double).toStringAsFixed(2)}',
-                  '\$${(m['subRevenue'] as double).toStringAsFixed(2)}',
+                  planCount.toString(),
+                  subCount.toString(),
+                  slotsCount.toString(),
+                  '\$${planRev.toStringAsFixed(2)}',
+                  '\$${subRev.toStringAsFixed(2)}',
                   '\$${totalMonthRev.toStringAsFixed(2)}',
                 ];
               }).toList(),
@@ -598,34 +701,9 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
         ),
       );
 
-      pdf.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat.a4.copyWith(marginTop: 1.5 * PdfPageFormat.cm),
-          build: (context) => [
-            pw.Text(
-              "3. Top Plans of the Year",
-              style: pw.TextStyle(fontSize: 26, fontWeight: pw.FontWeight.bold),
-            ),
-            pw.SizedBox(height: 15),
-            if (topPlans.isEmpty)
-              pw.Text("No data available.", style: const pw.TextStyle(fontSize: 22))
-            else
-              pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: topPlans.take(5).map((e) {
-                  final originalName = categoryOriginal[e.key] ?? e.key;
-                  return pw.Bullet(
-                    text: "$originalName: ${e.value} purchases",
-                    style: const pw.TextStyle(fontSize: 22),
-                  );
-                }).toList(),
-              ),
-          ],
-        ),
-      );
-
+      // Add detailed plan purchases pages with improved column widths and cancelled dates
       if (yearPlanDetails.isNotEmpty) {
-        const int pageSize = 50;
+        const int pageSize = 40;
         for (int i = 0; i < yearPlanDetails.length; i += pageSize) {
           final endIndex = (i + pageSize < yearPlanDetails.length) ? i + pageSize : yearPlanDetails.length;
           final pageData = yearPlanDetails.sublist(i, endIndex);
@@ -635,39 +713,50 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
               pageFormat: PdfPageFormat.a4.copyWith(marginTop: 1.5 * PdfPageFormat.cm),
               build: (context) => [
                 pw.Text(
-                  "4. Detailed Plan Purchases (${i + 1}-$endIndex of ${yearPlanDetails.length})",
-                  style: pw.TextStyle(fontSize: 26, fontWeight: pw.FontWeight.bold),
+                  "3. Detailed Plan Purchases (${i + 1}-$endIndex of ${yearPlanDetails.length})",
+                  style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold),
                 ),
                 pw.SizedBox(height: 15),
                 pw.Table.fromTextArray(
-                  headers: ['Month', 'Plan Category', 'Client', 'Amount', 'Date', 'Status', 'Payment Status', 'Cancel Date'],
-                  headerStyle: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold),
-                  cellStyle: const pw.TextStyle(fontSize: 18),
+                  headers: ['Month', 'Plan Category', 'Client', 'Amount', 'Purchase Date', 'Status', 'Cancelled/Completed Date', 'Payment Status'],
+                  headerStyle: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
+                  cellStyle: const pw.TextStyle(fontSize: 14),
                   cellAlignment: pw.Alignment.centerLeft,
                   headerAlignment: pw.Alignment.centerLeft,
                   border: pw.TableBorder.all(color: PdfColors.black, width: 1),
                   columnWidths: {
-                    0: const pw.FlexColumnWidth(1),
-                    1: const pw.FlexColumnWidth(2),
-                    2: const pw.FlexColumnWidth(2),
-                    3: const pw.FlexColumnWidth(1),
-                    4: const pw.FlexColumnWidth(1),
-                    5: const pw.FlexColumnWidth(1),
-                    6: const pw.FlexColumnWidth(1),
-                    7: const pw.FlexColumnWidth(1),
+                    0: const pw.FixedColumnWidth(50),  // Month
+                    1: const pw.FixedColumnWidth(100), // Plan Category
+                    2: const pw.FixedColumnWidth(80),  // Client
+                    3: const pw.FixedColumnWidth(70),  // Amount
+                    4: const pw.FixedColumnWidth(90),  // Purchase Date
+                    5: const pw.FixedColumnWidth(60),  // Status
+                    6: const pw.FixedColumnWidth(110),  // Cancelled/Completed Date,  // Status Date (NEW: shows cancelled/completed date)
+                    7: const pw.FixedColumnWidth(80),  // Payment Status
                   },
                   data: pageData.map((detail) {
-                    final dateStr = DateFormat('MMMM d, yyyy').format(detail['date'] as DateTime);
-                    final cancelStr = detail['cancelledDate'] != null ? DateFormat('MMMM d, yyyy').format((detail['cancelledDate'] as Timestamp).toDate()) : 'N/A';
+                    final purchaseDateStr = DateFormat('MMM d, yyyy').format(detail['date'] as DateTime);
+                    final status = (detail['status'] as String).toLowerCase();
+                    
+                    // Determine which date to show based on status
+                    String statusDateStr = '';
+                    if (status == 'cancelled' && detail['cancelledDate'] != null) {
+                      statusDateStr = DateFormat('MMM d, yyyy').format((detail['cancelledDate'] as Timestamp).toDate());
+                    } else if (status == 'completed' && detail['completedDate'] != null) {
+                      statusDateStr = DateFormat('MMM d, yyyy').format((detail['completedDate'] as Timestamp).toDate());
+                    }
+
+                    // For 'active' status or any other status without dates, leave blank
+                    
                     return [
                       detail['month'],
                       detail['plan'],
                       detail['client'],
-                      '\$${ (detail['amount'] as num).toStringAsFixed(2) }',
-                      dateStr,
+                      '\$${(detail['amount'] as num).toStringAsFixed(2)}',
+                      purchaseDateStr,
                       detail['status'],
+                      statusDateStr, // Shows date only if status is cancelled/completed
                       detail['paymentStatus'],
-                      cancelStr,
                     ];
                   }).toList(),
                 ),
@@ -681,16 +770,17 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
             pageFormat: PdfPageFormat.a4.copyWith(marginTop: 1.5 * PdfPageFormat.cm),
             build: (context) => pw.Center(
               child: pw.Text(
-                "4. Detailed Plan Purchases - No data available.",
-                style: pw.TextStyle(fontSize: 26, fontWeight: pw.FontWeight.bold),
+                "3. Detailed Plan Purchases - No data available.",
+                style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold),
               ),
             ),
           ),
         );
       }
 
+      // Add detailed subscription purchases pages with improved column widths and FIXED status
       if (yearSubscriptionDetails.isNotEmpty) {
-        const int pageSize = 50;
+        const int pageSize = 40;
         for (int i = 0; i < yearSubscriptionDetails.length; i += pageSize) {
           final endIndex = (i + pageSize < yearSubscriptionDetails.length) ? i + pageSize : yearSubscriptionDetails.length;
           final pageData = yearSubscriptionDetails.sublist(i, endIndex);
@@ -700,36 +790,54 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
               pageFormat: PdfPageFormat.a4.copyWith(marginTop: 1.5 * PdfPageFormat.cm),
               build: (context) => [
                 pw.Text(
-                  "5. Detailed Subscription Purchases (${i + 1}-$endIndex of ${yearSubscriptionDetails.length})",
-                  style: pw.TextStyle(fontSize: 26, fontWeight: pw.FontWeight.bold),
+                  "4. Detailed Subscription Purchases (${i + 1}-$endIndex of ${yearSubscriptionDetails.length})",
+                  style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold),
                 ),
                 pw.SizedBox(height: 15),
                 pw.Table.fromTextArray(
-                  headers: ['Month', 'Plan', 'Client', 'Amount', 'Date', 'Status', 'Payment Status'],
-                  headerStyle: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold),
-                  cellStyle: const pw.TextStyle(fontSize: 18),
+                  headers: ['Month', 'Plan', 'Client', 'Amount', 'Date', 'Status', 'Payment Status', 'End Date'],
+                  headerStyle: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
+                  cellStyle: const pw.TextStyle(fontSize: 14),
                   cellAlignment: pw.Alignment.centerLeft,
                   headerAlignment: pw.Alignment.centerLeft,
                   border: pw.TableBorder.all(color: PdfColors.black, width: 1),
                   columnWidths: {
-                    0: const pw.FlexColumnWidth(1),
-                    1: const pw.FlexColumnWidth(2),
-                    2: const pw.FlexColumnWidth(2),
-                    3: const pw.FlexColumnWidth(1),
-                    4: const pw.FlexColumnWidth(1),
-                    5: const pw.FlexColumnWidth(1),
-                    6: const pw.FlexColumnWidth(1),
+                    0: const pw.FixedColumnWidth(50),  // Month
+                    1: const pw.FixedColumnWidth(100), // Plan
+                    2: const pw.FixedColumnWidth(80),  // Client
+                    3: const pw.FixedColumnWidth(70),  // Amount
+                    4: const pw.FixedColumnWidth(90),  // Date
+                    5: const pw.FixedColumnWidth(60),  // Status
+                    6: const pw.FixedColumnWidth(80),  // Payment Status
+                    7: const pw.FixedColumnWidth(90),  // End Date
                   },
                   data: pageData.map((detail) {
-                    final dateStr = DateFormat('MMMM d, yyyy').format(detail['date'] as DateTime);
+                    final dateStr = DateFormat('MMM d, yyyy').format(detail['date'] as DateTime);
+                    final endDate = detail['endDate'];
+                    String endDateStr = 'N/A';
+                    
+                    if (endDate != null) {
+                      if (endDate is Timestamp) {
+                        endDateStr = DateFormat('MMM d, yyyy').format(endDate.toDate());
+                      } else {
+                        try {
+                          final parsedEndDate = DateTime.parse(endDate.toString());
+                          endDateStr = DateFormat('MMM d, yyyy').format(parsedEndDate);
+                        } catch (_) {
+                          endDateStr = 'Invalid';
+                        }
+                      }
+                    }
+                    
                     return [
                       detail['month'],
                       detail['plan'],
                       detail['client'],
-                      '\$${ (detail['amount'] as num).toStringAsFixed(2) }',
+                      '\$${(detail['amount'] as num).toStringAsFixed(2)}',
                       dateStr,
-                      detail['status'],
+                      detail['status'], // This now shows 'expired' correctly
                       detail['paymentStatus'],
+                      endDateStr,
                     ];
                   }).toList(),
                 ),
@@ -743,16 +851,17 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
             pageFormat: PdfPageFormat.a4.copyWith(marginTop: 1.5 * PdfPageFormat.cm),
             build: (context) => pw.Center(
               child: pw.Text(
-                "5. Detailed Subscription Purchases - No data available.",
-                style: pw.TextStyle(fontSize: 26, fontWeight: pw.FontWeight.bold),
+                "4. Detailed Subscription Purchases - No data available.",
+                style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold),
               ),
             ),
           ),
         );
       }
 
+      // Add detailed slot bookings pages
       if (yearSlotDetails.isNotEmpty) {
-        const int pageSize = 50;
+        const int pageSize = 40;
         for (int i = 0; i < yearSlotDetails.length; i += pageSize) {
           final endIndex = (i + pageSize < yearSlotDetails.length) ? i + pageSize : yearSlotDetails.length;
           final pageData = yearSlotDetails.sublist(i, endIndex);
@@ -762,24 +871,24 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
               pageFormat: PdfPageFormat.a4.copyWith(marginTop: 1.5 * PdfPageFormat.cm),
               build: (context) => [
                 pw.Text(
-                  "6. Detailed Slot Bookings (${i + 1}-$endIndex of ${yearSlotDetails.length})",
-                  style: pw.TextStyle(fontSize: 26, fontWeight: pw.FontWeight.bold),
+                  "5. Detailed Slot Bookings (${i + 1}-$endIndex of ${yearSlotDetails.length})",
+                  style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold),
                 ),
                 pw.SizedBox(height: 15),
                 pw.Table.fromTextArray(
                   headers: ['Month', 'Date', 'Time', 'Client', 'Trainer', 'Status'],
-                  headerStyle: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold),
-                  cellStyle: const pw.TextStyle(fontSize: 18),
+                  headerStyle: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
+                  cellStyle: const pw.TextStyle(fontSize: 14),
                   cellAlignment: pw.Alignment.centerLeft,
                   headerAlignment: pw.Alignment.centerLeft,
                   border: pw.TableBorder.all(color: PdfColors.black, width: 1),
                   columnWidths: {
-                    0: const pw.FlexColumnWidth(1),
-                    1: const pw.FlexColumnWidth(1),
-                    2: const pw.FlexColumnWidth(1),
-                    3: const pw.FlexColumnWidth(2),
-                    4: const pw.FlexColumnWidth(2),
-                    5: const pw.FlexColumnWidth(1),
+                    0: const pw.FixedColumnWidth(50),  // Month
+                    1: const pw.FixedColumnWidth(90),  // Date
+                    2: const pw.FixedColumnWidth(70),  // Time
+                    3: const pw.FixedColumnWidth(80),  // Client
+                    4: const pw.FixedColumnWidth(80),  // Trainer
+                    5: const pw.FixedColumnWidth(70),  // Status
                   },
                   data: pageData.map((detail) {
                     return [
@@ -802,8 +911,8 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
             pageFormat: PdfPageFormat.a4.copyWith(marginTop: 1.5 * PdfPageFormat.cm),
             build: (context) => pw.Center(
               child: pw.Text(
-                "6. Detailed Slot Bookings - No data available.",
-                style: pw.TextStyle(fontSize: 26, fontWeight: pw.FontWeight.bold),
+                "5. Detailed Slot Bookings - No data available.",
+                style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold),
               ),
             ),
           ),
@@ -814,6 +923,7 @@ class _RevenueReportScreenState extends State<RevenueReportScreen> {
       final outputFile = io.File("${outputDir.path}/Flex_Revenue_Report_$reportYear.pdf");
       await outputFile.writeAsBytes(await pdf.save());
       await OpenFile.open(outputFile.path);
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('PDF exported successfully')),
       );
@@ -1123,120 +1233,139 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
 
   void _startListening() {
     _planSub = FirebaseFirestore.instance
-        .collection('client_purchases')
-        .where('paymentStatus', isEqualTo: 'completed')
-        .snapshots()
-        .listen((snapshot) async {
-      double newRevenue = 0.0;
-      List<Map<String, dynamic>> newPlanDetails = [];
-      List<Map<String, dynamic>> newRevenueDetails = [];
-      Set<String> userIds = {};
-      int activePlanCount = 0;
-      List<Map<String, dynamic>> planDetailsWithDateTime = [];
-      List<Map<String, dynamic>> revenueDetailsWithDateTime = [];
+      .collection('client_purchases')
+      .where('paymentStatus', whereIn: ['completed', 'COMPLETED'])
+      .snapshots()
+      .listen((snapshot) async {
+    double newRevenue = 0.0;
+    List<Map<String, dynamic>> newPlanDetails = [];
+    List<Map<String, dynamic>> newRevenueDetails = [];
+    Set<String> userIds = {};
+    int allPlanPurchases = 0; // ✅ Always count all purchased plans
+    List<Map<String, dynamic>> planDetailsWithDateTime = [];
+    List<Map<String, dynamic>> revenueDetailsWithDateTime = [];
 
-      for (var doc in snapshot.docs) {
-        final data = doc.data();
-        
-        // Get effective date - completedDate if available, else createdAt
-        DateTime effectiveDate;
-        if (data['completedDate'] != null) {
-          effectiveDate = (data['completedDate'] as Timestamp).toDate();
-        } else if (data['createdAt'] != null) {
-          effectiveDate = (data['createdAt'] as Timestamp).toDate();
+    final targetMonth = widget.start.month;
+    final targetYear = widget.start.year;
+
+    for (var doc in snapshot.docs) {
+      final data = doc.data();
+
+      // ✅ Determine effective purchase date
+      DateTime? effectiveDate;
+      if (data['completedDate'] != null) {
+        effectiveDate = (data['completedDate'] as Timestamp).toDate();
+      } else if (data['createdAt'] != null) {
+        effectiveDate = (data['createdAt'] as Timestamp).toDate();
+      } else if (data['purchaseDate'] != null) {
+        final v = data['purchaseDate'];
+        if (v is Timestamp) {
+          effectiveDate = v.toDate();
         } else {
-          effectiveDate = (data['purchaseDate'] as Timestamp).toDate();
-        }
-        
-        // Check if the effective date is within the selected month
-        if (effectiveDate.month != widget.start.month || effectiveDate.year != widget.start.year) continue;
-        
-        final status = data['status']?.toString().toLowerCase() ?? '';
-        String displayStatus = status;
-        final planCategory = (data['Plan_Category'] ?? data['planName'] ?? '') as String;
-        final clientId = data['clientId'] ?? data['client_id'] ?? data['userId'] ?? data['user_id'] ?? data['uid'] ?? '';
-        final cancelledDate = data['cancelledDate'] as Timestamp?;
-
-        if (cancelledDate != null) {
-          displayStatus = 'cancelled';
-        }
-
-        final price = (data['price'] ?? data['plan_price'] ?? 0) as num;
-        newRevenue += price.toDouble();
-
-        if (clientId.isNotEmpty) userIds.add(clientId);
-
-        // Add to plan details with DateTime - include ALL plans regardless of status
-        planDetailsWithDateTime.add({
-          'plan': planCategory,
-          'clientId': clientId,
-          'date': effectiveDate,
-          'status': displayStatus,
-          'cancelledDate': cancelledDate?.toDate(),
-        });
-
-        // Add to revenue details with DateTime - include ALL plans regardless of status
-        revenueDetailsWithDateTime.add({
-          'plan': planCategory,
-          'clientId': clientId,
-          'amount': price,
-          'date': effectiveDate,
-          'status': displayStatus,
-          'paymentStatus': 'completed',
-          'cancelledDate': cancelledDate?.toDate(),
-        });
-
-        // Only count active plans for the summary
-        if (planCategory.trim().isNotEmpty && (status == 'active' || status == 'enabled')) {
-          activePlanCount++;
+          try {
+            effectiveDate = DateTime.parse(v.toString());
+          } catch (_) {}
         }
       }
 
-      // Sort both lists by date descending (newest first)
-      planDetailsWithDateTime.sort((a, b) => b['date'].compareTo(a['date']));
-      revenueDetailsWithDateTime.sort((a, b) => b['date'].compareTo(a['date']));
+      if (effectiveDate == null) continue;
 
-      // Convert to display lists with string dates
-      newPlanDetails = planDetailsWithDateTime.map((detail) {
-        return {
-          'plan': detail['plan'],
-          'clientId': detail['clientId'],
-          'date': DateFormat('MMMM d, yyyy').format(detail['date']),
-          'status': detail['status'],
-          'cancelledDate': detail['cancelledDate'] != null ? DateFormat('MMMM d, yyyy').format(detail['cancelledDate']) : null,
-        };
-      }).toList();
-
-      newRevenueDetails = revenueDetailsWithDateTime.map((detail) {
-        return {
-          'plan': detail['plan'],
-          'clientId': detail['clientId'],
-          'amount': detail['amount'],
-          'date': DateFormat('MMMM d, yyyy').format(detail['date']),
-          'status': detail['status'],
-          'paymentStatus': detail['paymentStatus'],
-          'cancelledDate': detail['cancelledDate'] != null ? DateFormat('MMMM d, yyyy').format(detail['cancelledDate']) : null,
-        };
-      }).toList();
-
-      Map<String, String> userNames = await _fetchUserNames(userIds);
-      for (var detail in newPlanDetails) {
-        detail['client'] = userNames[detail['clientId']] ?? 'Unknown Client';
-      }
-      for (var detail in newRevenueDetails) {
-        detail['client'] = userNames[detail['clientId']] ?? 'Unknown Client';
+      // ✅ Only include purchases within selected month/year
+      if (effectiveDate.month != targetMonth || effectiveDate.year != targetYear) {
+        continue;
       }
 
-      if (mounted) {
-        setState(() {
-          plans = activePlanCount;
-          revenue = newRevenue;
-          planDetails = newPlanDetails;
-          revenueDetails = newRevenueDetails;
-          loading = false;
-        });
+      final planCategory = (data['Plan_Category'] ?? data['planName'] ?? '') as String;
+      final clientId = data['clientId'] ?? data['client_id'] ?? data['userId'] ?? data['user_id'] ?? data['uid'] ?? '';
+      final statusRaw = (data['status']?.toString().toLowerCase() ?? '');
+      final cancelledDate = data['cancelledDate'] as Timestamp?;
+      final price = (data['price'] ?? data['plan_price'] ?? 0) as num;
+
+      // ✅ Always count the plan (no matter status)
+      allPlanPurchases++;
+
+      // ✅ Add price to revenue (including cancelled or completed)
+      newRevenue += price.toDouble();
+
+      if (clientId.isNotEmpty) userIds.add(clientId);
+
+      // ✅ Normalize display status
+      String displayStatus = statusRaw.isEmpty ? 'active' : statusRaw;
+      if (cancelledDate != null && displayStatus != 'cancelled') {
+        displayStatus = 'cancelled';
       }
-    });
+
+      // ✅ Add to detailed list
+      planDetailsWithDateTime.add({
+        'plan': planCategory,
+        'clientId': clientId,
+        'date': effectiveDate,
+        'status': displayStatus,
+        'cancelledDate': cancelledDate?.toDate(),
+      });
+
+      revenueDetailsWithDateTime.add({
+        'plan': planCategory,
+        'clientId': clientId,
+        'amount': price,
+        'date': effectiveDate,
+        'status': displayStatus,
+        'paymentStatus': 'completed',
+        'cancelledDate': cancelledDate?.toDate(),
+      });
+    }
+
+    // ✅ Sort by newest first
+    planDetailsWithDateTime.sort((a, b) => b['date'].compareTo(a['date']));
+    revenueDetailsWithDateTime.sort((a, b) => b['date'].compareTo(a['date']));
+
+    // ✅ Format for display
+    newPlanDetails = planDetailsWithDateTime.map((detail) {
+      return {
+        'plan': detail['plan'],
+        'clientId': detail['clientId'],
+        'date': DateFormat('MMMM d, yyyy').format(detail['date']),
+        'status': detail['status'],
+        'cancelledDate': detail['cancelledDate'] != null
+            ? DateFormat('MMMM d, yyyy').format(detail['cancelledDate'])
+            : null,
+      };
+    }).toList();
+
+    newRevenueDetails = revenueDetailsWithDateTime.map((detail) {
+      return {
+        'plan': detail['plan'],
+        'clientId': detail['clientId'],
+        'amount': detail['amount'],
+        'date': DateFormat('MMMM d, yyyy').format(detail['date']),
+        'status': detail['status'],
+        'paymentStatus': detail['paymentStatus'],
+        'cancelledDate': detail['cancelledDate'] != null
+            ? DateFormat('MMMM d, yyyy').format(detail['cancelledDate'])
+            : null,
+      };
+    }).toList();
+
+    // ✅ Fetch client names
+    Map<String, String> userNames = await _fetchUserNames(userIds);
+    for (var detail in newPlanDetails) {
+      detail['client'] = userNames[detail['clientId']] ?? 'Unknown Client';
+    }
+    for (var detail in newRevenueDetails) {
+      detail['client'] = userNames[detail['clientId']] ?? 'Unknown Client';
+    }
+
+    if (mounted) {
+      setState(() {
+        plans = allPlanPurchases; // ✅ Always reflect total purchases (never decrease)
+        revenue = newRevenue;
+        planDetails = newPlanDetails;
+        revenueDetails = newRevenueDetails;
+        loading = false;
+      });
+    }
+  });
+
 
     _slotSub = FirebaseFirestore.instance
         .collection('trainer_slots')
@@ -1333,96 +1462,128 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
     });
 
     _subscriptionSub = FirebaseFirestore.instance
-        .collection('client_subscriptions')
-        .where('paymentStatus', isEqualTo: 'completed')
-        .snapshots()
-        .listen((snapshot) async {
-      double newSubscriptionRevenue = 0.0;
-      List<Map<String, dynamic>> newSubscriptionRevenueDetails = [];
-      List<Map<String, dynamic>> newPdfSubscriptionDetails = [];
-      Set<String> subUserIds = <String>{};
-      int newPdfSubscriptionCount = 0;
+      .collection('client_subscriptions')
+      .where('paymentStatus', whereIn: ['completed', 'COMPLETED'])
+      .snapshots()
+      .listen((snapshot) async {
+    double newSubscriptionRevenue = 0.0;
+    List<Map<String, dynamic>> newSubscriptionRevenueDetails = [];
+    List<Map<String, dynamic>> newPdfSubscriptionDetails = [];
+    Set<String> subUserIds = <String>{};
+    int totalSubscriptions = 0; // ✅ Count all subscriptions for the month
 
-      final int targetMonth = widget.start.month;
-      final int targetYear = widget.start.year;
-      final nowUtc = DateTime.now().toUtc();
+    final targetMonth = widget.start.month;
+    final targetYear = widget.start.year;
 
-      for (var doc in snapshot.docs) {
-        final data = doc.data();
-        
-        // Get effective date - createdAt
-        DateTime effectiveDate;
-        if (data['createdAt'] != null) {
-          effectiveDate = (data['createdAt'] as Timestamp).toDate();
+    for (var doc in snapshot.docs) {
+      final data = doc.data();
+
+      // ✅ Determine date of purchase
+      DateTime? effectiveDate;
+      if (data['createdAt'] != null) {
+        effectiveDate = (data['createdAt'] as Timestamp).toDate();
+      } else if (data['purchaseDate'] != null) {
+        final v = data['purchaseDate'];
+        if (v is Timestamp) {
+          effectiveDate = v.toDate();
         } else {
-          effectiveDate = DateTime.parse(data['purchaseDate'] as String);
+          try {
+            effectiveDate = DateTime.parse(v.toString());
+          } catch (_) {}
         }
-        
-        // Check if the effective date is within the selected month
-        if (effectiveDate.month != targetMonth || effectiveDate.year != targetYear) continue;
+      }
 
-        final bool isActive = data['isActive'] ?? false;
-        final String statusStr = (data['status'] ?? '').toString().toLowerCase();
-        
-        DateTime? endDateUtc;
-        final dynamic endDateRaw = data['endDate'];
-        if (endDateRaw is String) {
-          endDateUtc = DateTime.parse(endDateRaw);
-        } else if (endDateRaw is Timestamp) {
-          endDateUtc = endDateRaw.toDate();
+      if (effectiveDate == null) continue;
+
+      // ✅ Only include subscriptions made in the selected month & year
+      if (effectiveDate.month != targetMonth || effectiveDate.year != targetYear) {
+        continue;
+      }
+
+      final num priceNum = data['price'] ?? 0;
+      final String userId = data['userId'] ?? '';
+      final String planName = data['planName'] ?? 'Unknown Subscription';
+      final String statusRaw = (data['status'] ?? '').toString().toLowerCase();
+      final bool isActive = data['isActive'] == true;
+      final Timestamp? cancelledDate = data['cancelledDate'] as Timestamp?;
+      final dynamic endDate = data['endDate']; // may be Timestamp or String
+
+      // ✅ Always count the purchase (even if cancelled or expired)
+      totalSubscriptions++;
+
+      // ✅ Only add to revenue if not cancelled (expired still counts)
+      final bool isCancelled = statusRaw == 'cancelled' || cancelledDate != null;
+      if (!isCancelled) {
+        newSubscriptionRevenue += priceNum.toDouble();
+      }
+
+      if (userId.isNotEmpty) subUserIds.add(userId);
+
+      // ✅ Determine readable status
+      String displayStatus = statusRaw.isEmpty
+          ? (isActive ? 'active' : 'inactive')
+          : statusRaw;
+
+      // ✅ Expiration handling (show expired but count still included)
+      if (endDate != null) {
+        DateTime? end;
+        if (endDate is Timestamp) {
+          end = endDate.toDate();
+        } else {
+          try {
+            end = DateTime.parse(endDate.toString());
+          } catch (_) {}
         }
-
-        final num priceNum = data['price'] ?? 0;
-        final String userId = data['userId'] ?? '';
-        final String dateStr = DateFormat('MMMM d, yyyy').format(effectiveDate);
-        String displayStatus = statusStr;
-        if (endDateUtc != null && nowUtc.isAfter(endDateUtc)) {
+        if (end != null && end.isBefore(DateTime.now())) {
           displayStatus = 'expired';
         }
-        final Map<String, dynamic> detailBase = {
-          'plan': data['planName'] ?? 'Unknown Plan',
-          'clientId': userId,
-          'amount': priceNum,
-          'date': dateStr,
-          'status': displayStatus,
-          'paymentStatus': 'completed',
-          'cancelledDate': null,
-        };
-        
-        newSubscriptionRevenue += priceNum.toDouble();
-        if (userId.isNotEmpty) {
-          subUserIds.add(userId);
-        }
-        newSubscriptionRevenueDetails.add(detailBase);
-        newPdfSubscriptionCount++;
-        newPdfSubscriptionDetails.add(detailBase);
       }
 
-      final Map<String, String> subUserNames = await _fetchUserNames(subUserIds);
-      for (var detail in newSubscriptionRevenueDetails) {
-        detail['client'] = subUserNames[detail['clientId']] ?? 'Unknown Client';
-      }
-      for (var detail in newPdfSubscriptionDetails) {
-        detail['client'] = subUserNames[detail['clientId']] ?? 'Unknown Client';
-      }
+      final String dateStr = DateFormat('MMMM d, yyyy').format(effectiveDate);
 
-      newSubscriptionRevenueDetails.sort((a, b) {
-        return DateFormat('MMMM d, yyyy').parse(b['date']).compareTo(DateFormat('MMMM d, yyyy').parse(a['date']));
-      });
-      newPdfSubscriptionDetails.sort((a, b) {
-        return DateFormat('MMMM d, yyyy').parse(b['date']).compareTo(DateFormat('MMMM d, yyyy').parse(a['date']));
-      });
+      // ✅ Add to details (for reports)
+      final detail = {
+        'plan': planName,
+        'clientId': userId,
+        'amount': priceNum,
+        'date': dateStr,
+        'status': displayStatus,
+        'paymentStatus': 'completed',
+        'cancelledDate': cancelledDate?.toDate(),
+      };
 
-      if (mounted) {
-        setState(() {
-          subscriptionRevenue = newSubscriptionRevenue;
-          pdfSubscriptionCount = newPdfSubscriptionCount;
-          subscriptionRevenueDetails = newSubscriptionRevenueDetails;
-          pdfSubscriptionDetails = newPdfSubscriptionDetails;
-          loading = false;
-        });
-      }
+      newSubscriptionRevenueDetails.add(detail);
+      newPdfSubscriptionDetails.add(detail);
+    }
+
+    // ✅ Fetch user names
+    final Map<String, String> subUserNames = await _fetchUserNames(subUserIds);
+
+    for (var detail in newSubscriptionRevenueDetails) {
+      detail['client'] = subUserNames[detail['clientId']] ?? 'Unknown Client';
+    }
+    for (var detail in newPdfSubscriptionDetails) {
+      detail['client'] = subUserNames[detail['clientId']] ?? 'Unknown Client';
+    }
+
+    // ✅ Sort by date (newest first)
+    newSubscriptionRevenueDetails.sort((a, b) {
+      return DateFormat('MMMM d, yyyy').parse(b['date']).compareTo(DateFormat('MMMM d, yyyy').parse(a['date']));
     });
+    newPdfSubscriptionDetails.sort((a, b) {
+      return DateFormat('MMMM d, yyyy').parse(b['date']).compareTo(DateFormat('MMMM d, yyyy').parse(a['date']));
+    });
+
+    if (mounted) {
+      setState(() {
+        pdfSubscriptionCount = totalSubscriptions; // ✅ Count all purchases, including expired
+        subscriptionRevenue = newSubscriptionRevenue;
+        subscriptionRevenueDetails = newSubscriptionRevenueDetails;
+        pdfSubscriptionDetails = newPdfSubscriptionDetails;
+        loading = false;
+      });
+    }
+  });
   }
 
   Future<Map<String, String>> _fetchUserNames(Set<String> ids) async {
@@ -1481,7 +1642,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
           ),
           pw.SizedBox(height: 20),
           pw.Bullet(
-            text: "Purchased Plans: $plans",
+            text: "Plan Purchases: $plans", // Total purchases in the month
             style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold),
           ),
           pw.SizedBox(height: 10),
@@ -1491,7 +1652,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
           ),
           pw.SizedBox(height: 10),
           pw.Bullet(
-            text: "PDF Subscriptions: $pdfSubscriptionCount",
+            text: "Subscription Purchases: $pdfSubscriptionCount", // Total subscription purchases
             style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold),
           ),
           pw.SizedBox(height: 10),
@@ -1590,12 +1751,12 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
         pageFormat: PdfPageFormat.a4.copyWith(marginTop: 1.5 * PdfPageFormat.cm),
         build: (context) => [
           pw.Text(
-            "PDF Subscriptions Details",
+            "Subscription Purchases Details",
             style: pw.TextStyle(fontSize: 30, fontWeight: pw.FontWeight.bold),
           ),
           pw.SizedBox(height: 20),
           if (pdfSubscriptionDetails.isEmpty)
-            pw.Text("No PDF subscriptions available", style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold))
+            pw.Text("No subscription purchases available", style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold))
           else
             pw.Table.fromTextArray(
               headers: ['Plan Category', 'Client', 'Amount', 'Date', 'Status', 'Payment Status'],
@@ -1843,12 +2004,12 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
       MaterialPageRoute(
         builder: (context) => Scaffold(
           appBar: AppBar(
-            title: Text("PDF Subscriptions - ${widget.fullMonthName}", style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+            title: Text("Subscription Purchases - ${widget.fullMonthName}", style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
             backgroundColor: widget.primaryColor,
             iconTheme: const IconThemeData(color: Colors.white),
           ),
           body: pdfSubscriptionDetails.isEmpty
-              ? Center(child: Text("No PDF subscriptions available", style: TextStyle(fontSize: 20, color: widget.textColor, fontWeight: FontWeight.bold)))
+              ? Center(child: Text("No subscription purchases available", style: TextStyle(fontSize: 20, color: widget.textColor, fontWeight: FontWeight.bold)))
               : ListView.builder(
                   itemCount: pdfSubscriptionDetails.length,
                   itemBuilder: (context, index) {
@@ -2072,7 +2233,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                       ),
                     ),
                     _buildMetricCard(
-                      "Purchased Plans", 
+                      "Plan Purchases", 
                       plans.toString(), 
                       widget.highlightColor, 
                       onTap: _showPlanDetails
@@ -2106,7 +2267,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                       ),
                     ),
                     _buildMetricCard(
-                      "PDF Subscriptions", 
+                      "Subscription Purchases", 
                       pdfSubscriptionCount.toString(), 
                       Colors.orange, 
                       onTap: _showPdfSubscriptionDetails
