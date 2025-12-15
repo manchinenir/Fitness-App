@@ -241,7 +241,6 @@ class _ClientWorkoutScreenState extends State<ClientWorkoutScreen> {
                 const Divider(),
                 const SizedBox(height: 8),
                 ...workoutMap.entries.map((entry) => _buildWorkoutDetails(entry)).toList(),
-                if (isMostRecent) _buildStartWorkoutButton(),
               ],
             ),
           ),
@@ -284,34 +283,6 @@ class _ClientWorkoutScreenState extends State<ClientWorkoutScreen> {
             );
           }).toList(),
         ],
-      ),
-    );
-  }
- 
-  Widget _buildStartWorkoutButton() {
-    return Padding(
-      padding: const EdgeInsets.only(top: 8, bottom: 16),
-      child: SizedBox(
-        width: double.infinity,
-        child: ElevatedButton.icon(
-          icon: const Icon(Icons.play_arrow_rounded, size: 20),
-          label: const Text(
-            "BEGIN WORKOUT",
-            style: TextStyle(letterSpacing: 0.8),
-          ),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: _primaryColor,
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            elevation: 0,
-          ),
-          onPressed: () {
-            // Implement workout start
-          },
-        ),
       ),
     );
   }

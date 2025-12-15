@@ -746,17 +746,6 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
             ),
             
             const SizedBox(height: 24),
-            
-            // Terms and conditions
-            const Center(
-              child: Text(
-                "Terms and Conditions",
-                style: TextStyle(
-                  color: Colors.blue,
-                  decoration: TextDecoration.underline,
-                ),
-              ),
-            ),
           ],
         ),
       );
