@@ -7,6 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'payment_history_page.dart';
+import 'settings_client.dart';
 
 const Color kPrimary = Color(0xFF1C2D5E); // Navy blue you shared
 
@@ -21,17 +22,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
   File? _imageFile;
   String? profileName;
   String? email;
-  String? imageUrl; // Add this line
+  String? imageUrl;
 
   @override
   void initState() {
     super.initState();
     _loadUserInfo();
-    _setupProfileImageListener(); // Add real-time listener
-
+    _setupProfileImageListener();
   }
   
-  // Add real-time listener for profile image changes
   void _setupProfileImageListener() {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
@@ -58,12 +57,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
         setState(() {
           profileName = snapshot.data()?['name'] ?? 'Your Name';
           email = snapshot.data()?['email'] ?? 'your@email.com';
-          imageUrl = snapshot.data()?['profileImage']; // Add this line
+          imageUrl = snapshot.data()?['profileImage'];
         });
       }
     }
   }
-  // Update the upload method to ensure it properly updates Firestore
+
   Future<String?> _uploadProfileImage() async {
     if (_imageFile == null) return null;
     
@@ -71,28 +70,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (user == null) return null;
     
     try {
-      // Create a reference to the location where you want to upload the image
       final ref = FirebaseStorage.instance
           .ref()
           .child('profile_images')
           .child('${user.uid}.jpg');
       
-      // Upload the file to Firebase Storage
       final uploadTask = ref.putFile(_imageFile!);
-      
-      // Wait for the upload to complete
       final snapshot = await uploadTask.whenComplete(() {});
-      
-      // Get the download URL
       final downloadUrl = await snapshot.ref.getDownloadURL();
       
-      // Update the user document in Firestore with the image URL
       await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .update({'profileImage': downloadUrl});
       
-      // Show success message
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Profile image updated successfully!')),
@@ -119,10 +110,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _imageFile = File(pickedImage.path);
       });
       
-      // Upload the image to Firebase Storage and get the URL
       final downloadUrl = await _uploadProfileImage();
       
-      // Update the local state with the new URL
       if (downloadUrl != null) {
         setState(() {
           imageUrl = downloadUrl;
@@ -240,6 +229,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     );
                   },
                 ),
+                _buildOption(
+                  context,
+                  icon: Icons.settings,
+                  label: 'Settings',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const SettingsClient(),
+                      ),
+                    );
+                  },
+                ),
               ],
             ),
           ),
@@ -294,8 +296,7 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
   String? weight;
   String? bmi;
   String? imageUrl;
-  File? _imageFile; // Add this line
-
+  File? _imageFile;
 
   final TextEditingController nameController = TextEditingController();
   final TextEditingController phoneController = TextEditingController();
@@ -310,10 +311,9 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
   void initState() {
     super.initState();
     _loadUserInfo();
-    _setupProfileImageListener(); // Add this line
+    _setupProfileImageListener();
   }
 
-  // Add this method
   void _setupProfileImageListener() {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
@@ -330,6 +330,7 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
       });
     }
   }
+
   Future<void> _pickImage() async {
     final picker = ImagePicker();
     final pickedImage =
@@ -339,10 +340,8 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
         _imageFile = File(pickedImage.path);
       });
       
-      // Upload the image to Firebase Storage and get the URL
       final downloadUrl = await _uploadProfileImage();
       
-      // Update the local state with the new URL
       if (downloadUrl != null) {
         setState(() {
           imageUrl = downloadUrl;
@@ -351,7 +350,6 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
     }
   }
 
-  // Add this method to upload image
   Future<String?> _uploadProfileImage() async {
     if (_imageFile == null) return null;
     
@@ -359,28 +357,20 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
     if (user == null) return null;
     
     try {
-      // Create a reference to the location where you want to upload the image
       final ref = FirebaseStorage.instance
           .ref()
           .child('profile_images')
           .child('${user.uid}.jpg');
       
-      // Upload the file to Firebase Storage
       final uploadTask = ref.putFile(_imageFile!);
-      
-      // Wait for the upload to complete
       final snapshot = await uploadTask.whenComplete(() {});
-      
-      // Get the download URL
       final downloadUrl = await snapshot.ref.getDownloadURL();
       
-      // Update the user document in Firestore with the image URL
       await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .update({'profileImage': downloadUrl});
       
-      // Show success message
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Profile image updated successfully!')),
@@ -397,6 +387,7 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
       return null;
     }
   }
+
   Future<void> _loadUserInfo() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
@@ -427,17 +418,12 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
     }
   }
 
-  // Function to calculate BMI
   double _calculateBMI() {
     final feet = double.tryParse(heightFeetController.text) ?? 0;
     final inches = double.tryParse(heightInchesController.text) ?? 0;
     final weight = double.tryParse(weightController.text) ?? 0;
     
-    // Convert height to meters (1 foot = 0.3048 meters, 1 inch = 0.0254 meters)
     final heightInMeters = (feet * 0.3048) + (inches * 0.0254);
-    
-    // Calculate BMI: weight (kg) / height (m)^2
-    // Weight is in pounds, so convert to kg (1 lb = 0.453592 kg)
     final weightInKg = weight * 0.453592;
     
     if (heightInMeters > 0) {
@@ -450,7 +436,6 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
   Future<void> _updateProfile() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
-      // Calculate BMI before updating
       final newBMI = _calculateBMI();
       
       await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
@@ -510,11 +495,10 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Profile Image
                     if (imageUrl != null)
                       Center(
                         child: GestureDetector(
-                          onTap: _pickImage, // Make the image tappable to change it
+                          onTap: _pickImage,
                           child: Stack(
                             children: [
                               Container(
@@ -555,7 +539,6 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
                       ),
                     const SizedBox(height: 24),
                     
-                    // Personal Information Card
                     Card(
                       elevation: 4,
                       shape: RoundedRectangleBorder(
@@ -576,7 +559,6 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
                             ),
                             const SizedBox(height: 16),
                             
-                            // Name Field
                             _buildInfoRow(
                               label: 'Full Name',
                               value: name ?? '',
@@ -587,7 +569,6 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
                             ),
                             const SizedBox(height: 16),
                             
-                            // Email Field (read-only)
                             _buildReadOnlyInfoRow(
                               label: 'Email Address',
                               value: email ?? '',
@@ -595,7 +576,6 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
                             ),
                             const SizedBox(height: 16),
                             
-                            // Phone Field
                             _buildInfoRow(
                               label: 'Phone Number',
                               value: phone ?? '',
@@ -606,7 +586,6 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
                             ),
                             const SizedBox(height: 16),
                             
-                            // Gender Field (now editable)
                             _buildInfoRow(
                               label: 'Gender',
                               value: gender ?? 'Not specified',
@@ -622,7 +601,6 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
                     
                     const SizedBox(height: 20),
                     
-                    // Physical Information Card
                     Card(
                       elevation: 4,
                       shape: RoundedRectangleBorder(
@@ -643,7 +621,6 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
                             ),
                             const SizedBox(height: 16),
                             
-                            // Height Field
                             Row(
                               children: [
                                 Expanded(
@@ -672,7 +649,6 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
                             ),
                             const SizedBox(height: 16),
                             
-                            // Weight Field
                             _buildInfoRow(
                               label: 'Weight (lbs)',
                               value: weight ?? '',
@@ -688,7 +664,6 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
                     
                     const SizedBox(height: 20),
                     
-                    // BMI Card
                     Card(
                       elevation: 4,
                       shape: RoundedRectangleBorder(
@@ -709,7 +684,6 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
                             ),
                             const SizedBox(height: 16),
                             
-                            // BMI Field (read-only, highlighted)
                             Container(
                               padding: const EdgeInsets.all(20),
                               decoration: BoxDecoration(
@@ -767,7 +741,6 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
     
     const SizedBox(height: 24),
     
-    // Edit/Save Button
     Row(
       children: [
         if (_isEditing)
@@ -783,7 +756,6 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
               onPressed: () {
                 setState(() {
                   _isEditing = false;
-                  // Reset controllers to original values
                   nameController.text = name ?? '';
                   phoneController.text = phone ?? '';
                   genderController.text = gender ?? '';
@@ -972,12 +944,18 @@ class ProgressTrackingPage extends StatefulWidget {
   @override
   State<ProgressTrackingPage> createState() => _ProgressTrackingPageState();
 }
+
 class _ProgressTrackingPageState extends State<ProgressTrackingPage> {
   final TextEditingController _weightController = TextEditingController();
   final TextEditingController _dateController = TextEditingController();
   DateTime _selectedDate = DateTime.now();
   List<Map<String, dynamic>> _progressEntries = [];
   Map<String, dynamic>? _editingEntry;
+  File? _progressPhotoFile;
+  String? _progressPhotoUrl;
+  bool _showPhotoContainer = false; // New flag to control photo container visibility
+  bool _removeExistingPhoto = false; // ✅ ADD THIS LINE
+
 
   @override
   void initState() {
@@ -1004,6 +982,8 @@ class _ProgressTrackingPageState extends State<ProgressTrackingPage> {
               'id': doc.id,
               'weight': data['weight'],
               'date': (data['date'] as Timestamp).toDate(),
+              'photoUrl': data['photoUrl'],
+              'notes': data['notes'] ?? '',
             };
           }).toList();
         });
@@ -1016,12 +996,53 @@ class _ProgressTrackingPageState extends State<ProgressTrackingPage> {
       context: context,
       initialDate: _selectedDate,
       firstDate: DateTime(2000),
-      lastDate: DateTime.now(), // Prevent selecting future dates
+      lastDate: DateTime.now(),
     );
     if (picked != null && picked != _selectedDate) {
       setState(() {
         _selectedDate = picked;
         _dateController.text = DateFormat('yyyy-MM-dd').format(picked);
+      });
+    }
+  }
+
+  Future<String?> _uploadProgressPhoto() async {
+    if (_progressPhotoFile == null) return null;
+    
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return null;
+    
+    try {
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final ref = FirebaseStorage.instance
+          .ref()
+          .child('progress_photos')
+          .child(user.uid)
+          .child('$timestamp.jpg');
+      
+      final uploadTask = ref.putFile(_progressPhotoFile!);
+      final snapshot = await uploadTask.whenComplete(() {});
+      final downloadUrl = await snapshot.ref.getDownloadURL();
+      
+      return downloadUrl;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to upload photo: $e')),
+        );
+      }
+      return null;
+    }
+  }
+
+  Future<void> _pickProgressPhoto() async {
+    final picker = ImagePicker();
+    final pickedImage =
+        await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+    if (pickedImage != null) {
+      setState(() {
+        _progressPhotoFile = File(pickedImage.path);
+        _showPhotoContainer = true; // Show container when photo is picked
       });
     }
   }
@@ -1034,7 +1055,6 @@ class _ProgressTrackingPageState extends State<ProgressTrackingPage> {
       return;
     }
 
-    // Check if date already exists (unless we're editing)
     final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
     final existingEntry = _progressEntries.firstWhere(
       (entry) => DateFormat('yyyy-MM-dd').format(entry['date']) == dateStr,
@@ -1051,19 +1071,31 @@ class _ProgressTrackingPageState extends State<ProgressTrackingPage> {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       try {
+        String? photoUrl;
+        if (_progressPhotoFile != null) {
+          photoUrl = await _uploadProgressPhoto();
+        }
+
         if (_editingEntry != null) {
-          // Update existing entry
+          final updateData = {
+            'weight': double.parse(_weightController.text),
+            'date': Timestamp.fromDate(_selectedDate),
+          };
+
+          if (_removeExistingPhoto) {
+            updateData['photoUrl'] = FieldValue.delete(); // 🔥 REMOVE FROM FIRESTORE
+          } else if (photoUrl != null) {
+            updateData['photoUrl'] = photoUrl;
+          }
+
+          
           await FirebaseFirestore.instance
               .collection('users')
               .doc(user.uid)
               .collection('progress')
               .doc(_editingEntry!['id'])
-              .update({
-            'weight': double.parse(_weightController.text),
-            'date': Timestamp.fromDate(_selectedDate),
-          });
+              .update(updateData);
         } else {
-          // Add new entry
           await FirebaseFirestore.instance
               .collection('users')
               .doc(user.uid)
@@ -1071,18 +1103,22 @@ class _ProgressTrackingPageState extends State<ProgressTrackingPage> {
               .add({
             'weight': double.parse(_weightController.text),
             'date': Timestamp.fromDate(_selectedDate),
+            'photoUrl': photoUrl,
+            'createdAt': Timestamp.now(),
           });
         }
 
-        // Clear the form
         _weightController.clear();
         setState(() {
           _selectedDate = DateTime.now();
           _dateController.text = DateFormat('yyyy-MM-dd').format(_selectedDate);
           _editingEntry = null;
+          _progressPhotoFile = null;
+          _progressPhotoUrl = null;
+          _removeExistingPhoto = false;
+          _showPhotoContainer = false; // Hide photo container after saving
         });
 
-        // Reload the data
         await _loadProgressData();
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1118,6 +1154,11 @@ class _ProgressTrackingPageState extends State<ProgressTrackingPage> {
       _weightController.text = entry['weight'].toString();
       _selectedDate = entry['date'];
       _dateController.text = DateFormat('yyyy-MM-dd').format(_selectedDate);
+      _progressPhotoUrl = entry['photoUrl'];
+      _progressPhotoFile = null;
+      _showPhotoContainer = entry['photoUrl'] != null; // Show container if editing entry has photo
+      _removeExistingPhoto = false; // ✅ IMPORTANT
+
     });
   }
 
@@ -1127,55 +1168,118 @@ class _ProgressTrackingPageState extends State<ProgressTrackingPage> {
       _weightController.clear();
       _selectedDate = DateTime.now();
       _dateController.text = DateFormat('yyyy-MM-dd').format(_selectedDate);
+      _progressPhotoFile = null;
+      _progressPhotoUrl = null;
+      _showPhotoContainer = false; // Hide photo container when canceling
+      _removeExistingPhoto = false;
+
     });
   }
 
-  // Get motivational message based on weight change
+  void _viewProgressPhoto(String? photoUrl) {
+    if (photoUrl != null) {
+      showDialog(
+        context: context,
+        builder: (context) => Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.all(20),
+          child: Stack(
+            children: [
+              Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.5),
+                      blurRadius: 20,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Image.network(
+                    photoUrl,
+                    fit: BoxFit.contain,
+                    loadingBuilder: (context, child, loadingProgress) {
+                      if (loadingProgress == null) return child;
+                      return Container(
+                        width: double.infinity,
+                        height: 400,
+                        color: Colors.grey[200],
+                        child: const Center(
+                          child: CircularProgressIndicator(),
+                        ),
+                      );
+                    },
+                    errorBuilder: (context, error, stackTrace) {
+                      return Container(
+                        width: double.infinity,
+                        height: 400,
+                        color: Colors.grey[200],
+                        child: const Center(
+                          child: Icon(Icons.error, color: Colors.red, size: 50),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 10,
+                right: 10,
+                child: CircleAvatar(
+                  backgroundColor: Colors.black54,
+                  child: IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+  }
+
   String _getMotivationalMessage(double difference) {
-    if (difference < -10) {
-      return '💪 Amazing transformation! You\'re crushing your goals!';
-    } else if (difference < -5) {
-      return '🔥 Outstanding progress! Keep up the great work!';
-    } else if (difference < -2) {
-      return '👍 Great job! The results are showing!';
-    } else if (difference < 0) {
-      return '👏 Nice! Every pound counts!';
-    } else if (difference == 0) {
-      return '💯 Maintaining is progress too! Stay consistent!';
-    } else if (difference < 2) {
-      return '🌟 Small fluctuations are normal. Stay focused!';
-    } else if (difference < 5) {
-      return '🏋 Don\'t get discouraged. You can get back on track!';
-    } else {
-      return '🏋 Time to refocus! You\'ve got this!';
-    }
+    if (difference < -10) return '💪 Amazing transformation! You\'re crushing your goals!';
+    if (difference < -5) return '🔥 Outstanding progress! Keep up the great work!';
+    if (difference < -2) return '👍 Great job! The results are showing!';
+    if (difference < 0) return '👏 Nice! Every pound counts!';
+    if (difference == 0) return '💯 Maintaining is progress too! Stay consistent!';
+    if (difference < 2) return '🌟 Small fluctuations are normal. Stay focused!';
+    if (difference < 5) return '🏋 Don\'t get discouraged. You can get back on track!';
+    return '🏋 Time to refocus! You\'ve got this!';
   }
 
-  // Get icon based on weight change
   IconData _getTrendIcon(double difference) {
-    if (difference < 0) {
-      return Icons.trending_down;
-    } else if (difference > 0) {
-      return Icons.trending_up;
-    } else {
-      return Icons.trending_flat;
-    }
+    if (difference < 0) return Icons.trending_down;
+    if (difference > 0) return Icons.trending_up;
+    return Icons.trending_flat;
   }
 
-  // Get color based on weight change
   Color _getTrendColor(double difference) {
-    if (difference < 0) {
-      return Colors.green;
-    } else if (difference > 0) {
-      return Colors.red;
-    } else {
-      return Colors.grey;
-    }
+    if (difference < 0) return Colors.green;
+    if (difference > 0) return Colors.red;
+    return Colors.grey;
+  }
+
+  // Create a custom dashed border
+  BoxDecoration _createDashedBorderDecoration() {
+    return BoxDecoration(
+      borderRadius: BorderRadius.circular(10),
+      color: Colors.white,
+      border: Border.all(
+        color: Colors.grey.shade300,
+        width: 1.5,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    // Prepare data for chart - sort by date ascending
     final chartData = _progressEntries.toList()
       ..sort((a, b) => a['date'].compareTo(b['date']));
 
@@ -1209,6 +1313,8 @@ class _ProgressTrackingPageState extends State<ProgressTrackingPage> {
                       ),
                     ),
                     const SizedBox(height: 16),
+                    
+                    // Weight Input
                     TextFormField(
                       controller: _weightController,
                       keyboardType: TextInputType.number,
@@ -1221,22 +1327,261 @@ class _ProgressTrackingPageState extends State<ProgressTrackingPage> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _dateController,
-                      readOnly: true,
-                      decoration: InputDecoration(
-                        labelText: 'Date',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
+                    
+                    // Date Input with Upload Button
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _dateController,
+                            readOnly: true,
+                            decoration: InputDecoration(
+                              labelText: 'Date',
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              prefixIcon: const Icon(Icons.calendar_today),
+                              suffixIcon: IconButton(
+                                icon: const Icon(Icons.calendar_month),
+                                onPressed: () => _selectDate(context),
+                              ),
+                            ),
+                          ),
                         ),
-                        prefixIcon: const Icon(Icons.calendar_today),
-                        suffixIcon: IconButton(
-                          icon: const Icon(Icons.calendar_month),
-                          onPressed: () => _selectDate(context),
+                        const SizedBox(width: 12),
+                        // Upload Image Button
+                        SizedBox(
+                          width: 50,
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: kPrimary,
+                              padding: const EdgeInsets.all(12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                _showPhotoContainer = !_showPhotoContainer;
+                              });
+                            },
+
+                            child: const Icon(
+                              Icons.add_a_photo,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    
+                    // Progress Photo Container (Conditionally Visible)
+                    if (_showPhotoContainer)
+                      Card(
+                        color: Colors.grey.shade50,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: BorderSide(color: Colors.grey.shade300),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(Icons.photo_camera, color: kPrimary, size: 20),
+                                  const SizedBox(width: 8),
+                                  const Text(
+                                    'Progress Photo (Optional)',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: kPrimary,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: kPrimary.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text(
+                                      'Optional',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: kPrimary,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              const Text(
+                                'Track your visual progress by adding a photo',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              
+                              // Photo Preview or Placeholder
+                              if (_progressPhotoFile != null || _progressPhotoUrl != null)
+                                Container(
+                                  height: 150,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(10),
+                                    color: Colors.white,
+                                  ),
+                                  child: Stack(
+                                    children: [
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(10),
+                                        child: _progressPhotoFile != null
+                                            ? Image.file(
+                                                _progressPhotoFile!,
+                                                width: double.infinity,
+                                                height: double.infinity,
+                                                fit: BoxFit.cover,
+                                              )
+                                            : _progressPhotoUrl != null
+                                                ? Image.network(
+                                                    _progressPhotoUrl!,
+                                                    width: double.infinity,
+                                                    height: double.infinity,
+                                                    fit: BoxFit.cover,
+                                                    loadingBuilder: (context, child, loadingProgress) {
+                                                      if (loadingProgress == null) return child;
+                                                      return Center(
+                                                        child: CircularProgressIndicator(
+                                                          value: loadingProgress.expectedTotalBytes != null
+                                                              ? loadingProgress.cumulativeBytesLoaded /
+                                                                  loadingProgress.expectedTotalBytes!
+                                                              : null,
+                                                        ),
+                                                      );
+                                                    },
+                                                  )
+                                                : Container(),
+                                      ),
+                                      Positioned(
+                                        top: 8,
+                                        right: 8,
+                                        child: CircleAvatar(
+                                          backgroundColor: Colors.black54,
+                                          radius: 16,
+                                          child: IconButton(
+                                            icon: const Icon(Icons.close, size: 16),
+                                            color: Colors.white,
+                                            onPressed: () {
+                                              setState(() {
+                                                _progressPhotoFile = null;
+                                                _progressPhotoUrl = null;
+                                                _removeExistingPhoto = true; // MARK FOR REMOVAL
+                                              });
+                                            },
+
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              else
+                                GestureDetector(
+                                  onTap: _pickProgressPhoto,
+                                  child: Container(
+                                    height: 120,
+                                    decoration: _createDashedBorderDecoration(),
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.add_a_photo,
+                                          size: 40,
+                                          color: kPrimary.withOpacity(0.6),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          'Add Progress Photo',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            color: kPrimary,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'Optional - Track your visual transformation',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: Colors.grey,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              
+                              const SizedBox(height: 12),
+                              
+                              // Photo Action Buttons
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      icon: const Icon(Icons.camera_alt, size: 16),
+                                      label: const Text('Take Photo'),
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: kPrimary,
+                                        side: BorderSide(color: kPrimary),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                      ),
+                                      onPressed: () async {
+                                        final picker = ImagePicker();
+                                        final pickedImage = await picker.pickImage(
+                                          source: ImageSource.camera,
+                                          imageQuality: 85,
+                                        );
+                                        if (pickedImage != null) {
+                                          setState(() {
+                                            _progressPhotoFile = File(pickedImage.path);
+                                          });
+                                        }
+                                      },
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      icon: const Icon(Icons.photo_library, size: 16),
+                                      label: const Text('From Gallery'),
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: kPrimary,
+                                        side: BorderSide(color: kPrimary),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                      ),
+                                      onPressed: _pickProgressPhoto,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
                     const SizedBox(height: 20),
+                    
+                    // Action Buttons
                     Row(
                       children: [
                         if (_editingEntry != null)
@@ -1287,7 +1632,7 @@ class _ProgressTrackingPageState extends State<ProgressTrackingPage> {
             ),
             const SizedBox(height: 20),
             
-            // Progress Chart (only show if we have data)
+            // Progress Chart
             if (_progressEntries.length > 1) 
               Card(
                 elevation: 4,
@@ -1340,7 +1685,6 @@ class _ProgressTrackingPageState extends State<ProgressTrackingPage> {
                                   getTitlesWidget: (value, meta) {
                                     if (value >= 0 && value < chartData.length) {
                                       final date = chartData[value.toInt()]['date'];
-                                      // Show all dates but format them appropriately
                                       return Padding(
                                         padding: const EdgeInsets.only(top: 8.0),
                                         child: Text(
@@ -1351,7 +1695,7 @@ class _ProgressTrackingPageState extends State<ProgressTrackingPage> {
                                             fontWeight: FontWeight.w500,
                                           ),
                                           textAlign: TextAlign.center,
-                                        ),
+                                        )
                                       );
                                     }
                                     return const Text('');
@@ -1470,11 +1814,17 @@ class _ProgressTrackingPageState extends State<ProgressTrackingPage> {
                         color: kPrimary,
                       ),
                     ),
-                    Text(
-                      'Total Entries: ${_progressEntries.length}',
-                      style: const TextStyle(
-                        color: Colors.grey,
-                      ),
+                    Row(
+                      children: [
+                        const Icon(Icons.photo, size: 16, color: Colors.grey),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${_progressEntries.where((entry) => entry['photoUrl'] != null).length}/${_progressEntries.length}',
+                          style: const TextStyle(
+                            color: Colors.grey,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -1501,8 +1851,8 @@ class _ProgressTrackingPageState extends State<ProgressTrackingPage> {
                   final weight = entry['weight'];
                   final date = entry['date'] as DateTime;
                   final formattedDate = DateFormat('MMM dd, yyyy').format(date);
+                  final photoUrl = entry['photoUrl'];
                   
-                  // Calculate difference from previous entry if available
                   double difference = 0;
                   String differenceText = '';
                   String motivationalMessage = '';
@@ -1527,125 +1877,199 @@ class _ProgressTrackingPageState extends State<ProgressTrackingPage> {
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                      leading: Container(
-                        width: 50,
-                        height: 50,
-                        decoration: BoxDecoration(
-                          color: kPrimary.withOpacity(0.1),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          _getTrendIcon(difference),
-                          color: _getTrendColor(difference),
-                          size: 24,
-                        ),
-                      ),
-                      title: Text(
-                        '$weight lbs',
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            formattedDate,
-                            style: const TextStyle(fontSize: 14),
+                    child: Column(
+                      children: [
+                        ListTile(
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
                           ),
-                          if (difference != 0 && index < _progressEntries.length - 1)
-                            Text(
-                              motivationalMessage,
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: const Color.fromARGB(255, 46, 46, 46),
-                                fontStyle: FontStyle.italic,
-                                fontWeight: FontWeight.w500,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                          leading: Container(
+                            width: 50,
+                            height: 50,
+                            decoration: BoxDecoration(
+                              color: kPrimary.withOpacity(0.1),
+                              shape: BoxShape.circle,
                             ),
-                        ],
-                      ),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (difference != 0) 
-                            Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
+                            child: Icon(
+                              _getTrendIcon(difference),
+                              color: _getTrendColor(difference),
+                              size: 24,
+                            ),
+                          ),
+                          title: Text(
+                            '$weight lbs',
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                formattedDate,
+                                style: const TextStyle(fontSize: 14),
+                              ),
+                              if (difference != 0 && index < _progressEntries.length - 1)
                                 Text(
-                                  differenceText,
+                                  motivationalMessage,
                                   style: TextStyle(
                                     fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                    color: _getTrendColor(difference),
+                                    color: const Color.fromARGB(255, 46, 46, 46),
+                                    fontStyle: FontStyle.italic,
+                                    fontWeight: FontWeight.w500,
                                   ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
-                                const SizedBox(height: 4),
-                                Icon(
-                                  _getTrendIcon(difference),
-                                  size: 16,
-                                  color: _getTrendColor(difference),
+                            ],
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (photoUrl != null)
+                                IconButton(
+                                  icon: const Icon(Icons.photo, color: Colors.blue),
+                                  onPressed: () => _viewProgressPhoto(photoUrl),
+                                  tooltip: 'View Progress Photo',
                                 ),
-                              ],
-                            ),
-                          const SizedBox(width: 16),
-                          PopupMenuButton<String>(
-                            itemBuilder: (BuildContext context) => [
-                              const PopupMenuItem(
-                                value: 'edit',
-                                child: Text('Edit'),
-                              ),
-                              const PopupMenuItem(
-                                value: 'delete',
-                                child: Text('Delete', style: TextStyle(color: Colors.red)),
+                              if (difference != 0) 
+                                Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                      differenceText,
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold,
+                                        color: _getTrendColor(difference),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Icon(
+                                      _getTrendIcon(difference),
+                                      size: 16,
+                                      color: _getTrendColor(difference),
+                                    ),
+                                  ],
+                                ),
+                              const SizedBox(width: 8),
+                              PopupMenuButton<String>(
+                                itemBuilder: (BuildContext context) => [
+                                  const PopupMenuItem(
+                                    value: 'edit',
+                                    child: Text('Edit'),
+                                  ),
+                                  const PopupMenuItem(
+                                    value: 'delete',
+                                    child: Text('Delete', style: TextStyle(color: Colors.red)),
+                                  ),
+                                ],
+                                onSelected: (value) {
+                                  if (value == 'edit') {
+                                    _editProgressEntry(entry);
+                                  } else if (value == 'delete') {
+                                    showDialog(
+                                      context: context,
+                                      builder: (BuildContext context) {
+                                        return AlertDialog(
+                                          title: const Text('Delete Entry'),
+                                          content: const Text(
+                                              'Are you sure you want to delete this progress entry?'),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () {
+                                                Navigator.of(context).pop();
+                                              },
+                                              child: const Text('Cancel'),
+                                            ),
+                                            TextButton(
+                                              onPressed: () {
+                                                _deleteProgressEntry(entry['id']);
+                                                Navigator.of(context).pop();
+                                              },
+                                              child: const Text(
+                                                'Delete',
+                                                style: TextStyle(color: Colors.red),
+                                              ),
+                                            ),
+                                          ],
+                                        );
+                                      },
+                                    );
+                                  }
+                                },
                               ),
                             ],
-                            onSelected: (value) {
-                              if (value == 'edit') {
-                                _editProgressEntry(entry);
-                              } else if (value == 'delete') {
-                                showDialog(
-                                  context: context,
-                                  builder: (BuildContext context) {
-                                    return AlertDialog(
-                                      title: const Text('Delete Entry'),
-                                      content: const Text(
-                                          'Are you sure you want to delete this progress entry?'),
-                                      actions: [
-                                        TextButton(
-                                          onPressed: () {
-                                            Navigator.of(context).pop();
-                                          },
-                                          child: const Text('Cancel'),
-                                        ),
-                                        TextButton(
-                                          onPressed: () {
-                                            _deleteProgressEntry(entry['id']);
-                                            Navigator.of(context).pop();
-                                          },
-                                          child: const Text(
-                                            'Delete',
-                                            style: TextStyle(color: Colors.red),
-                                          ),
-                                        ),
-                                      ],
-                                    );
-                                  },
-                                );
-                              }
-                            },
                           ),
-                        ],
-                      ),
+                        ),
+                        
+                        // Photo Preview in List
+                        if (photoUrl != null)
+                          GestureDetector(
+                            onTap: () => _viewProgressPhoto(photoUrl),
+                            child: Container(
+                              height: 120,
+                              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(8),
+                                color: Colors.grey.shade50,
+                              ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Stack(
+                                  children: [
+                                    Image.network(
+                                      photoUrl,
+                                      width: double.infinity,
+                                      height: double.infinity,
+                                      fit: BoxFit.cover,
+                                      loadingBuilder: (context, child, loadingProgress) {
+                                        if (loadingProgress == null) return child;
+                                        return Center(
+                                          child: CircularProgressIndicator(
+                                            value: loadingProgress.expectedTotalBytes != null
+                                                ? loadingProgress.cumulativeBytesLoaded /
+                                                    loadingProgress.expectedTotalBytes!
+                                                : null,
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                    Positioned(
+                                      bottom: 8,
+                                      right: 8,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black54,
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: const Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.photo, size: 12, color: Colors.white),
+                                            SizedBox(width: 4),
+                                            Text(
+                                              'View Photo',
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   );
                 },
@@ -1657,21 +2081,15 @@ class _ProgressTrackingPageState extends State<ProgressTrackingPage> {
   }
 
   String _getFormattedDateLabel(DateTime date, List<Map<String, dynamic>> chartData, int index) {
-    // For better readability, show different formats based on the number of data points
     if (chartData.length <= 7) {
-      // If we have 7 or fewer data points, show full date
       return DateFormat('MMM d').format(date);
     } else if (chartData.length <= 14) {
-      // If we have 8-14 data points, show abbreviated format
-      // Show full date for first, last, and every 3rd point
       if (index == 0 || index == chartData.length - 1 || index % 3 == 0) {
         return DateFormat('MMM d').format(date);
       } else {
         return DateFormat('d').format(date);
       }
     } else {
-      // For more than 14 data points, show only day numbers
-      // But show month abbreviation for first point of each month
       if (index == 0 || 
           (index > 0 && chartData[index-1]['date'].month != date.month)) {
         return '${DateFormat('MMM').format(date)}\n${date.day}';
