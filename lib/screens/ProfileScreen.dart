@@ -7,7 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'payment_history_page.dart';
-import 'settings_client.dart';
+import 'settings_client.dart';  // Add this if missing
 
 const Color kPrimary = Color(0xFF1C2D5E); // Navy blue you shared
 
@@ -294,7 +294,7 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
   String? heightFeet;
   String? heightInches;
   String? weight;
-  String? bmi;
+  double? bmi;
   String? imageUrl;
   File? _imageFile;
 
@@ -404,7 +404,7 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
           heightFeet = data['height_feet'] ?? '';
           heightInches = data['height_inches'] ?? '';
           weight = data['weight_lbs'] ?? '';
-          bmi = data['bmi'] ?? '0.0';
+          bmi = (data['bmi'] ?? 0).toDouble();
           imageUrl = data['profileImage'];
           
           nameController.text = name ?? '';
@@ -445,7 +445,7 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
         'height_feet': heightFeetController.text.trim(),
         'height_inches': heightInchesController.text.trim(),
         'weight_lbs': weightController.text.trim(),
-        'bmi': newBMI.toStringAsFixed(2),
+        'bmi': newBMI,
       });
 
       if (!mounted) return;
@@ -461,7 +461,7 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
         heightFeet = heightFeetController.text.trim();
         heightInches = heightInchesController.text.trim();
         weight = weightController.text.trim();
-        bmi = newBMI.toStringAsFixed(2);
+        bmi = newBMI;
       });
     }
   }
@@ -716,7 +716,7 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
                                   ),
                                   const SizedBox(height: 8),
                                   Text(
-                                    bmi ?? '0.0',
+                                    bmi?.toStringAsFixed(2) ?? '0.0',
                                     style: const TextStyle(
                                       fontSize: 32,
                                       fontWeight: FontWeight.bold,
@@ -725,7 +725,7 @@ class _PersonalInfoPageState extends State<PersonalInfoPage> {
                                   ),
                   const SizedBox(height: 8),
                   Text(
-                    _getBMICategory(double.tryParse(bmi ?? '0') ?? 0),
+                    _getBMICategory(bmi ?? 0),
                     style: const TextStyle(
                       fontSize: 14,
                       color: Colors.white70,
@@ -955,6 +955,7 @@ class _ProgressTrackingPageState extends State<ProgressTrackingPage> {
   String? _progressPhotoUrl;
   bool _showPhotoContainer = false; // New flag to control photo container visibility
   bool _removeExistingPhoto = false; // ✅ ADD THIS LINE
+  bool _isSaving = false; // ✅ ADD THIS LINE - Flag to track saving state
 
 
   @override
@@ -1048,6 +1049,8 @@ class _ProgressTrackingPageState extends State<ProgressTrackingPage> {
   }
 
   Future<void> _saveProgressEntry() async {
+    if (_isSaving) return; // ✅ ADD THIS LINE - Prevent multiple clicks
+    
     if (_weightController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter your weight')),
@@ -1067,6 +1070,10 @@ class _ProgressTrackingPageState extends State<ProgressTrackingPage> {
       );
       return;
     }
+
+    setState(() {
+      _isSaving = true; // ✅ ADD THIS LINE - Disable button
+    });
 
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
@@ -1117,6 +1124,7 @@ class _ProgressTrackingPageState extends State<ProgressTrackingPage> {
           _progressPhotoUrl = null;
           _removeExistingPhoto = false;
           _showPhotoContainer = false; // Hide photo container after saving
+          _isSaving = false; // ✅ ADD THIS LINE - Re-enable button
         });
 
         await _loadProgressData();
@@ -1127,10 +1135,17 @@ class _ProgressTrackingPageState extends State<ProgressTrackingPage> {
             : 'Progress added successfully!')),
         );
       } catch (e) {
+        setState(() {
+          _isSaving = false; // ✅ ADD THIS LINE - Re-enable button on error
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: $e')),
         );
       }
+    } else {
+      setState(() {
+        _isSaving = false; // ✅ ADD THIS LINE - Re-enable button if user is null
+      });
     }
   }
 
@@ -1594,7 +1609,7 @@ class _ProgressTrackingPageState extends State<ProgressTrackingPage> {
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                               ),
-                              onPressed: _cancelEdit,
+                              onPressed: _isSaving ? null : _cancelEdit, // ✅ MODIFIED LINE
                               child: const Text(
                                 'Cancel',
                                 style: TextStyle(
@@ -1614,14 +1629,36 @@ class _ProgressTrackingPageState extends State<ProgressTrackingPage> {
                                 borderRadius: BorderRadius.circular(12),
                               ),
                             ),
-                            onPressed: _saveProgressEntry,
-                            child: Text(
-                              _editingEntry != null ? 'Update' : 'Add Progress',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
+                            onPressed: _isSaving ? null : _saveProgressEntry, // ✅ MODIFIED LINE
+                            child: _isSaving // ✅ MODIFIED SECTION
+                                ? Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          color: Colors.white,
+                                          strokeWidth: 2,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        _editingEntry != null ? 'Updating...' : 'Saving...',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                : Text(
+                                    _editingEntry != null ? 'Update' : 'Add Progress',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
                           ),
                         ),
                       ],
