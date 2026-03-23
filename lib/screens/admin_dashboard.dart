@@ -13,7 +13,7 @@ import 'client_list_screen.dart';
 import 'post_announcement.dart';
 import 'RevenueReport_screen.dart';
 import 'settings.dart';
-import 'active_members_screen.dart'; // ⬅️ tap the pie to open this page
+import 'active_members_screen.dart';
 
 class AdminDashboard extends StatefulWidget {
   final String userName;
@@ -69,7 +69,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     _weekStart = _mondayStart(now);
     _nextWeekStart = _weekStart.add(const Duration(days: 7));
     _totalSlotsThisWeek = _totalSlotsForWeek(_weekStart, availabilityMap);
-    _loadAdminName(); // keeps local fallback for first time login
+    _loadAdminName();
   }
 
   Future<void> _loadAdminName() async {
@@ -115,7 +115,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
-  // ========= Active predicate helpers (respect status + date window) =========
   bool _isWithin(DateTime now, Timestamp? start, Timestamp? end) {
     final s = start?.toDate();
     final e = end?.toDate();
@@ -139,13 +138,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final status = (data['status'] ?? '').toString().toLowerCase().trim();
     if (status != 'active') return false;
 
-    // Check if subscription has isActive field
     final isActive = data['isActive'] == true;
     if (!isActive) return false;
 
-    // Check date validity
     final endDate = data['endDate'];
-    if (endDate == null) return true; // No end date = always active
+    if (endDate == null) return true;
 
     DateTime end;
     if (endDate is Timestamp) {
@@ -160,9 +157,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
     return DateTime.now().isBefore(end);
   }
-  // =========================================================================
-
-  // (Old _activeMembersStream removed; pie uses nested builders to union purchases+subs)
 
   Stream<int> _bookedThisWeekStream() {
     final q = _fs
@@ -179,28 +173,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
       }
       return total;
     });
-  }
-
-  String _getGreeting() {
-    final nowUtc = DateTime.now().toUtc();
-    final year = nowUtc.year;
-
-    DateTime findNthSunday(int year, int month, int n) {
-      DateTime date = DateTime.utc(year, month, 1);
-      int daysToAdd = (DateTime.sunday - date.weekday + 7) % 7;
-      date = date.add(Duration(days: daysToAdd));
-      return date.add(Duration(days: 7 * (n - 1)));
-    }
-
-    final dstStart = DateTime.utc(year, 3, findNthSunday(year, 3, 2).day, 7); // 2nd Sun Mar @07:00 UTC
-    final dstEnd   = DateTime.utc(year, 11, findNthSunday(year, 11, 1).day, 6); // 1st Sun Nov @06:00 UTC
-    final isDST = nowUtc.isAfter(dstStart) && nowUtc.isBefore(dstEnd);
-    final easternTime = nowUtc.add(Duration(hours: isDST ? -4 : -5));
-    final hour = easternTime.hour;
-
-    if (hour >= 0 && hour < 12) return 'Good Morning';
-    if (hour >= 12 && hour < 17) return 'Good Afternoon';
-    return 'Good Evening';
   }
 
   String _getNameFromEmail(String email) {
@@ -267,7 +239,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   @override
   Widget build(BuildContext context) {
-    final double appBarExpandedHeight = MediaQuery.of(context).size.height * 0.24;
+    final theme = Theme.of(context);
     final user = FirebaseAuth.instance.currentUser;
 
     return Scaffold(
@@ -276,7 +248,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         slivers: [
           SliverAppBar(
             pinned: true,
-            expandedHeight: appBarExpandedHeight,
+            expandedHeight: 240,
             backgroundColor: const Color(0xFF1C2D5E),
             shape: const RoundedRectangleBorder(
               borderRadius: BorderRadius.only(
@@ -288,101 +260,123 @@ class _AdminDashboardState extends State<AdminDashboard> {
               background: SafeArea(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Stack(
-                        children: [
-                          Container(
-                            width: 56,
-                            height: 56,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Colors.white, width: 2),
-                              image: _profileImage != null
-                                  ? DecorationImage(image: FileImage(_profileImage!), fit: BoxFit.cover)
-                                  : null,
-                              color: _profileImage == null ? Colors.grey[300] : null,
-                            ),
-                            child: _profileImage == null
-                                ? const Icon(Icons.person, size: 26, color: Colors.grey)
-                                : null,
-                          ),
-                          Positioned(
-                            bottom: 0,
-                            right: 0,
-                            child: GestureDetector(
-                              onTap: _pickProfileImage,
-                              child: Container(
-                                width: 20,
-                                height: 20,
-                                decoration: const BoxDecoration(
-                                  color: Colors.white,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(Icons.edit, size: 12, color: Color(0xFF1C2D5E)),
-                              ),
-                            ),
-                          ),
-                        ],
+                      const SizedBox(height: 40),
+                      Text(
+                        'Dashboard',
+                        style: theme.textTheme.headlineMedium?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 32,
+                        ),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(_getGreeting(), style: const TextStyle(color: Colors.white70, fontSize: 14)),
-                            const SizedBox(height: 4),
-                            if (user != null)
-                              StreamBuilder<DocumentSnapshot>(
-                                stream: _fs.collection('users').doc(user.uid).snapshots(),
-                                builder: (context, snapshot) {
-                                  if (snapshot.hasData && snapshot.data!.exists) {
-                                    final data = snapshot.data!.data() as Map<String, dynamic>;
-                                    final liveName = data['name'] ?? adminName;
-                                    return Text(
-                                      liveName.toString().isNotEmpty
-                                          ? '${liveName.toString()[0].toUpperCase()}${liveName.toString().substring(1)}'
-                                          : adminName,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 22,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    );
-                                  }
-                                  return Text(
+                      const SizedBox(height: 20),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Stack(
+                            children: [
+                              Container(
+                                width: 56,
+                                height: 56,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Colors.white, width: 2),
+                                  image: _profileImage != null
+                                      ? DecorationImage(image: FileImage(_profileImage!), fit: BoxFit.cover)
+                                      : null,
+                                  color: _profileImage == null ? Colors.grey[300] : null,
+                                ),
+                                child: _profileImage == null
+                                    ? const Icon(Icons.person, size: 26, color: Colors.grey)
+                                    : null,
+                              ),
+                              Positioned(
+                                bottom: 0,
+                                right: 0,
+                                child: GestureDetector(
+                                  onTap: _pickProfileImage,
+                                  child: Container(
+                                    width: 20,
+                                    height: 20,
+                                    decoration: const BoxDecoration(
+                                      color: Colors.white,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(Icons.edit, size: 12, color: Color(0xFF1C2D5E)),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Welcome back,',
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    color: Colors.white70,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                if (user != null)
+                                  StreamBuilder<DocumentSnapshot>(
+                                    stream: _fs.collection('users').doc(user.uid).snapshots(),
+                                    builder: (context, snapshot) {
+                                      if (snapshot.hasData && snapshot.data!.exists) {
+                                        final data = snapshot.data!.data() as Map<String, dynamic>;
+                                        final liveName = data['name'] ?? adminName;
+                                        return Text(
+                                          liveName.toString().isNotEmpty
+                                              ? '${liveName.toString()[0].toUpperCase()}${liveName.toString().substring(1)}'
+                                              : adminName,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 22,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        );
+                                      }
+                                      return Text(
+                                        adminName,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 22,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      );
+                                    },
+                                  )
+                                else
+                                  Text(
                                     adminName,
                                     style: const TextStyle(
                                       color: Colors.white,
                                       fontSize: 22,
                                       fontWeight: FontWeight.bold,
                                     ),
-                                  );
-                                },
-                              )
-                            else
-                              Text(
-                                adminName,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.logout, color: Colors.white, size: 26),
-                        onPressed: () => Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
                 ),
               ),
             ),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.logout, color: Colors.white, size: 26),
+                onPressed: () => Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false),
+              ),
+            ],
           ),
 
           SliverPadding(
@@ -391,7 +385,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               delegate: SliverChildListDelegate([
                 Row(
                   children: [
-                    // 🔵 LEFT: Active Members pie (UNION of active purchases + subscriptions; respects dates)
+                    // Active Members Card with Professional Gradient
                     Expanded(
                       child: StreamBuilder<QuerySnapshot>(
                         stream: _fs
@@ -400,21 +394,23 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             .snapshots(),
                         builder: (context, purchasesSnap) {
                           if (purchasesSnap.connectionState == ConnectionState.waiting) {
-                            return _buildPieChartCard(
+                            return _buildProfessionalCard(
                               title: 'Active Members',
                               value: '—',
                               subtitle: 'Loading',
                               percentage: 0,
-                              color: Colors.indigo,
+                              gradient1: const Color(0xFF4158D0),
+                              gradient2: const Color(0xFFC850C0),
                             );
                           }
                           if (purchasesSnap.hasError) {
-                            return _buildPieChartCard(
+                            return _buildProfessionalCard(
                               title: 'Active Members',
                               value: '0',
                               subtitle: 'Error',
                               percentage: 0,
-                              color: Colors.indigo,
+                              gradient1: const Color(0xFF4158D0),
+                              gradient2: const Color(0xFFC850C0),
                             );
                           }
 
@@ -434,29 +430,29 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                 .snapshots(),
                             builder: (context, subsSnap) {
                               if (subsSnap.connectionState == ConnectionState.waiting) {
-                                return _buildPieChartCard(
+                                return _buildProfessionalCard(
                                   title: 'Active Members',
                                   value: '—',
                                   subtitle: 'Loading',
                                   percentage: 0,
-                                  color: Colors.indigo,
+                                  gradient1: const Color(0xFF4158D0),
+                                  gradient2: const Color(0xFFC850C0),
                                 );
                               }
                               if (subsSnap.hasError) {
-                                // Fall back to purchases-only if subs had an error
-                                return _buildPieChartCard(
+                                return _buildProfessionalCard(
                                   title: 'Active Members',
                                   value: activePurchaseUsers.length.toString(),
                                   subtitle: 'of —',
                                   percentage: 0,
-                                  color: Colors.indigo,
+                                  gradient1: const Color(0xFF4158D0),
+                                  gradient2: const Color(0xFFC850C0),
                                 );
                               }
 
                               final usersWithSubs = <String>{};
                               for (final d in (subsSnap.data?.docs ?? [])) {
                                 final m = d.data() as Map<String, dynamic>;
-                                // Use the same subscription check as in ActiveMembersScreen
                                 if (_isSubscriptionActive(m)) {
                                   final uid = (m['userId'] ?? '').toString();
                                   if (uid.isNotEmpty) usersWithSubs.add(uid);
@@ -484,12 +480,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                       );
                                     },
                                     borderRadius: BorderRadius.circular(12),
-                                    child: _buildPieChartCard(
+                                    child: _buildProfessionalCard(
                                       title: 'Active Members',
                                       value: activeCount.toString(),
                                       subtitle: totalClients > 0 ? 'of $totalClients' : 'Active',
                                       percentage: pct,
-                                      color: Colors.indigo,
+                                      gradient1: const Color(0xFF4158D0),
+                                      gradient2: const Color(0xFFC850C0),
                                     ),
                                   );
                                 },
@@ -502,7 +499,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
                     const SizedBox(width: 16),
 
-                    // 🟢 RIGHT: Schedule Slots pie (tap to see weekly details)
+                    // Schedule Slots Card with Professional Gradient
                     Expanded(
                       child: StreamBuilder<int>(
                         stream: _bookedThisWeekStream(),
@@ -522,12 +519,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                 ),
                               );
                             },
-                            child: _buildPieChartCard(
+                            child: _buildProfessionalCard(
                               title: 'Schedule Slots',
                               value: booked.toString(),
                               subtitle: 'Booked',
                               percentage: pct,
-                              color: Colors.green,
+                              gradient1: const Color(0xFF0093E9),
+                              gradient2: const Color(0xFF80D0C7),
                             ),
                           );
                         },
@@ -538,65 +536,58 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
                 const SizedBox(height: 20),
 
+                // Navigation Grid
                 GridView.count(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   crossAxisCount: 2,
                   mainAxisSpacing: 16,
                   crossAxisSpacing: 16,
-                  childAspectRatio: 1.1,
+                  childAspectRatio: 1.2,
                   children: [
                     _buildNavTile(
-                      context,
-                      Icons.calendar_today,
-                      'Trainer Schedule',
-                      const AdminCreateSlotsScreen(),
-                      iconColor: Colors.blue,
+                      icon: Icons.calendar_today,
+                      label: 'Trainer Schedule',
+                      color: Colors.blue,
+                      targetScreen: const AdminCreateSlotsScreen(),
                     ),
                     _buildNavTile(
-                      context,
-                      Icons.people,
-                      'Client List',
-                      const ClientListScreen(),
-                      iconColor: Colors.purple,
+                      icon: Icons.people,
+                      label: 'Client List',
+                      color: Colors.purple,
+                      targetScreen: const ClientListScreen(),
                     ),
                     _buildNavTile(
-                      context,
-                      FontAwesomeIcons.dollarSign,
-                      'Revenue Report',
-                      const RevenueReportScreen(),
-                      iconColor: Colors.green,
+                      icon: FontAwesomeIcons.dollarSign,
+                      label: 'Revenue Report',
+                      color: Colors.green,
+                      targetScreen: const RevenueReportScreen(),
                     ),
                     _buildNavTile(
-                      context,
-                      FontAwesomeIcons.dumbbell,
-                      'Workout Plans',
-                      null,
-                      iconColor: Colors.orange,
+                      icon: FontAwesomeIcons.dumbbell,
+                      label: 'Workout Plans',
+                      color: Colors.orange,
                       action: () {
                         Navigator.pushNamed(context, '/adminWorkoutMulti', arguments: []);
                       },
                     ),
                     _buildNavTile(
-                      context,
-                      Icons.announcement,
-                      'Announcements',
-                      const PostAnnouncementScreen(),
-                      iconColor: Colors.red,
+                      icon: Icons.announcement,
+                      label: 'Announcements',
+                      color: Colors.red,
+                      targetScreen: const PostAnnouncementScreen(),
                     ),
                     _buildNavTile(
-                      context,
-                      Icons.settings,
-                      'Settings',
-                      const AdminSettingsPage(),
-                      iconColor: Colors.grey,
+                      icon: Icons.settings,
+                      label: 'Settings',
+                      color: Colors.grey,
+                      targetScreen: const AdminSettingsPage(),
                     ),
                     _buildNavTile(
-                      context,
-                      Icons.list_alt,
-                      'Plans',
-                      const PlansScreen(),
-                      iconColor: Colors.teal,
+                      icon: Icons.list_alt,
+                      label: 'Plans',
+                      color: Colors.teal,
+                      targetScreen: const PlansScreen(),
                     ),
                   ],
                 ),
@@ -608,23 +599,34 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  Widget _buildPieChartCard({
+  // Professional Card with gradient background and matching circular progress
+  Widget _buildProfessionalCard({
     required String title,
     required String value,
     required String subtitle,
     required double percentage,
-    required Color color,
+    required Color gradient1,
+    required Color gradient2,
   }) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        gradient: LinearGradient(
+          colors: [gradient1, gradient2],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.08),
-            blurRadius: 6,
-            offset: const Offset(0, 3),
+            color: gradient1.withOpacity(0.3),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+          BoxShadow(
+            color: gradient2.withOpacity(0.2),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
@@ -635,7 +637,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             style: const TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w600,
-              color: Colors.black87,
+              color: Colors.white,
             ),
           ),
           const SizedBox(height: 10),
@@ -644,16 +646,43 @@ class _AdminDashboardState extends State<AdminDashboard> {
             child: Stack(
               alignment: Alignment.center,
               children: [
+                // Outer decorative circle with gradient
+                Container(
+                  width: 74,
+                  height: 74,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      colors: [
+                        Colors.white.withOpacity(0.2),
+                        Colors.white.withOpacity(0.1),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                  ),
+                ),
+                // Progress indicator with gradient colors
                 SizedBox(
                   width: 74,
                   height: 74,
-                  child: CircularProgressIndicator(
-                    value: percentage,
-                    strokeWidth: 10,
-                    backgroundColor: color.withOpacity(0.18),
-                    color: color,
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween<double>(begin: 0, end: percentage),
+                    duration: const Duration(milliseconds: 1000),
+                    curve: Curves.easeInOut,
+                    builder: (context, value, child) {
+                      return CircularProgressIndicator(
+                        value: value,
+                        strokeWidth: 8,
+                        backgroundColor: Colors.white.withOpacity(0.15),
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          Colors.white, // White for better contrast
+                        ),
+                      );
+                    },
                   ),
                 ),
+                // Center text
                 Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -662,14 +691,21 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       style: TextStyle(
                         fontSize: 22,
                         fontWeight: FontWeight.bold,
-                        color: color,
+                        color: Colors.white,
+                        shadows: [
+                          Shadow(
+                            color: Colors.black.withOpacity(0.2),
+                            offset: const Offset(1, 1),
+                            blurRadius: 2,
+                          ),
+                        ],
                       ),
                     ),
                     Text(
                       subtitle,
                       style: const TextStyle(
                         fontSize: 12,
-                        color: Colors.grey,
+                        color: Colors.white70,
                       ),
                     ),
                   ],
@@ -682,50 +718,74 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  Widget _buildNavTile(
-    BuildContext context,
-    IconData icon,
-    String label,
-    Widget? targetScreen, {
+  // Navigation Tile
+  Widget _buildNavTile({
+    required IconData icon,
+    required String label,
+    required Color color,
+    Widget? targetScreen,
     VoidCallback? action,
-    Color iconColor = Colors.blue,
   }) {
-    return GestureDetector(
-      onTap: targetScreen != null
-          ? () => Navigator.push(context, MaterialPageRoute(builder: (_) => targetScreen))
-          : action,
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.grey.withOpacity(0.08),
-              blurRadius: 6,
-              offset: const Offset(0, 3),
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: targetScreen != null
+            ? () => Navigator.push(context, MaterialPageRoute(builder: (_) => targetScreen))
+            : action,
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            gradient: LinearGradient(
+              colors: [
+                color.withOpacity(0.15),
+                color.withOpacity(0.05),
+              ],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
             ),
-          ],
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 32, color: iconColor),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
+          ),
+          child: Stack(
+            children: [
+              // Background icon
+              Positioned(
+                top: 8,
+                right: 8,
+                child: Icon(
+                  icon,
+                  size: 40,
+                  color: color.withOpacity(0.15),
+                ),
               ),
-            ),
-          ],
+              // Content
+              Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(icon, color: color, size: 28),
+                  const SizedBox(height: 12),
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-// ===== Schedule Slots Detail Screen (unchanged functional logic) =====
+// ===== Schedule Slots Detail Screen (unchanged) =====
 class ScheduleSlotsDetailScreen extends StatefulWidget {
   final DateTime weekStart;
   final DateTime nextWeekStart;
@@ -801,7 +861,6 @@ class _ScheduleSlotsDetailScreenState extends State<ScheduleSlotsDetailScreen> {
         }
       }
 
-      // Sort: TODAY, UPCOMING, COMPLETED; within groups by time (COMPLETED desc)
       slots.sort((a, b) {
         final orderA = _getOrder(a.status);
         final orderB = _getOrder(b.status);
@@ -809,9 +868,9 @@ class _ScheduleSlotsDetailScreenState extends State<ScheduleSlotsDetailScreen> {
         final aDateTime = _parseSlotDateTime(a);
         final bDateTime = _parseSlotDateTime(b);
         if (a.status == 'COMPLETED') {
-          return bDateTime.compareTo(aDateTime); // desc for completed
+          return bDateTime.compareTo(aDateTime);
         } else {
-          return aDateTime.compareTo(bDateTime); // asc for others
+          return aDateTime.compareTo(bDateTime);
         }
       });
 
@@ -1012,6 +1071,7 @@ class SlotDetail {
     required this.endTime,
     required this.booked,
     required this.status,
+    
     required this.bookedNames,
   });
 }
