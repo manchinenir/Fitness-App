@@ -194,6 +194,7 @@ class _AdminSettingsPageState extends State<AdminSettingsPage>
   Future<void> _toggleClientActive(String uid, bool isActive, String clientName) async {
     await _fs.collection('users').doc(uid).set({
       'isActive': isActive,
+      'deactivatedBy': isActive ? null : 'admin', // 🔥 IMPORTANT
       'updated_at': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
     if (!mounted) return;

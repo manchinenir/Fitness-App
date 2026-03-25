@@ -30,59 +30,40 @@ class SettingsClient extends StatelessWidget {
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const Center(
-        child: CircularProgressIndicator(),
-      ),
+      builder: (_) => const Center(child: CircularProgressIndicator()),
     );
 
     try {
-      String uid = user.uid;
+      final uid = user.uid;
 
-      // Delete Firestore user document
+      // ✅ ONLY deactivate (DO NOT DELETE AUTH)
       await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .delete();
+        .collection('users')
+        .doc(uid)
+        .update({
+      'isActive': false,
+      'deactivatedBy': 'client',
+      'needsReverification': true, // 🔥 ADD THIS
+      'verificationEmailSent': false, // 🔥 ADD THIS
+      'updated_at': FieldValue.serverTimestamp(),
+    });
 
-      // Delete progress data
-      final progress = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .collection('progress')
-          .get();
+      // ✅ Just logout (instead of deleting auth)
+      await FirebaseAuth.instance.signOut();
 
-      for (var doc in progress.docs) {
-        await doc.reference.delete();
-      }
-
-      // Delete profile image
-      try {
-        await FirebaseStorage.instance
-            .ref()
-            .child('profile_images/$uid.jpg')
-            .delete();
-      } catch (_) {}
-
-      // Delete Firebase Auth account
-      await user.delete();
-
-      // Go to Login Screen
       if (context.mounted) {
         Navigator.of(context, rootNavigator: true).pop();
+
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(
-            builder: (context) => const LoginPage(),
-          ),
+          MaterialPageRoute(builder: (_) => const LoginPage()),
           (route) => false,
         );
       }
     } catch (e) {
-      if (context.mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
-      }
+      Navigator.of(context, rootNavigator: true).pop();
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error deleting account: $e")),
+        SnackBar(content: Text("Error: $e")),
       );
     }
   }
@@ -95,7 +76,7 @@ class SettingsClient extends StatelessWidget {
       builder: (dialogContext) => AlertDialog(
         title: const Text("Delete Account"),
         content: const Text(
-          "Are you sure you want to permanently delete your account? "
+          "Are you sure you want to deactivate your account? "
           "This action cannot be undone.",
         ),
         actions: [
