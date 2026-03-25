@@ -142,10 +142,64 @@ class _LoginPageState extends State<LoginPage> {
       final data = userDoc.data() as Map<String, dynamic>? ?? {};
 
       final isActive = data['isActive'] ?? true;
-      if (!isActive) {
-        await _auth.signOut();
-        throw Exception("Your account has been deactivated. Please contact support.");
-      }
+        final deactivatedBy = data['deactivatedBy'] ?? 'client';
+
+        if (!isActive) {
+          final user = userCredential.user!;
+
+          // 🔴 ADMIN BLOCK
+          if (deactivatedBy == 'admin') {
+            await _auth.signOut();
+            throw Exception("Your account has been blocked by admin.");
+          }
+
+          // 🟢 CLIENT DEACTIVATED
+          if (deactivatedBy == 'client') {
+            final needsReverification = data['needsReverification'] ?? false;
+            final emailSent = data['verificationEmailSent'] ?? false;
+
+            if (needsReverification) {
+
+              // 🔥 SEND EMAIL ONLY ONCE
+              if (!emailSent) {
+                await user.sendEmailVerification();
+
+                await _firestore.collection('users').doc(user.uid).update({
+                  'verificationEmailSent': true,
+                });
+
+                await _auth.signOut();
+
+                throw Exception("Verification email sent. Please verify to reactivate your account.");
+              }
+
+              // 🔥 AFTER EMAIL SENT → WAIT FOR USER TO VERIFY
+              await user.reload();
+              final refreshedUser = _auth.currentUser!;
+
+              if (!refreshedUser.emailVerified) {
+                await _auth.signOut();
+                throw Exception("Please verify your email to continue.");
+              }
+
+              // ✅ VERIFIED → ACTIVATE
+              await _firestore.collection('users').doc(user.uid).update({
+                'isActive': true,
+                'deactivatedBy': null,
+                'needsReverification': false,
+                'verificationEmailSent': false,
+                'updated_at': FieldValue.serverTimestamp(),
+              });
+            }
+          }
+        }
+
+        // ✅ NOW check for normal users
+        if (!userCredential.user!.emailVerified) {
+          await userCredential.user!.sendEmailVerification();
+          await _auth.signOut();
+          throw Exception("Please verify your email to Activate.");
+        }
 
       final role = data['role'] ?? 'client';
       final emailFromDoc = data['email'] ?? '';
@@ -160,9 +214,13 @@ class _LoginPageState extends State<LoginPage> {
         setState(() => errorMessage = 'Invalid email or password');
       } else if (msg.toLowerCase().contains('email not verified')) {
         setState(() => errorMessage = 'Please verify your email to continue.');
-      } else if (msg.toLowerCase().contains('deactivated')) {
+      } else if (msg.toLowerCase().contains('blocked')) {
         setState(() => errorMessage =
-            'Your account has been deactivated. Please contact support.');
+            'Your account has been blocked by admin.');
+      }
+      else if (msg.toLowerCase().contains('reactivate')) {
+        setState(() => errorMessage =
+            'Please verify your email to reactivate your account.');
       } else {
         setState(() => errorMessage = 'Something went wrong. Please try again.');
       }
