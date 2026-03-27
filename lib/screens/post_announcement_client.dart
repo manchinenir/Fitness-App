@@ -31,7 +31,9 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
   int monthsEarned = 0;
   List<Map<String, dynamic>> successfulReferrals = [];
   bool isLoadingReferralData = true;
-
+  Set<String> _expandedComments = {}; // Track expanded comments
+  Set<String> _expandedReplies = {}; // Track expanded reply threads
+  Map<String, List<Map<String, dynamic>>> _commentReplies = {}; // Cache replies
 
   Future<void> _fetchUserData() async {
     try {
@@ -138,11 +140,254 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
     }
   }
 
+  Future<void> _showReplyDialog(BuildContext context, String announcementId, 
+      Map<String, dynamic> comment, {Map<String, dynamic>? reply}) async {
+    final TextEditingController replyController = TextEditingController();
+    final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+    
+    // Set initial text with mention if replying to a specific reply
+    String initialText = '';
+    if (reply != null) {
+      initialText = '@${reply['username']} ';
+    } else if (comment['username'] != null) {
+      initialText = '@${comment['username']} ';
+    }
+    replyController.text = initialText;
+    
+    return showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(reply == null ? 'Reply to Comment' : 'Reply to ${reply['username']}'),
+        content: TextField(
+          controller: replyController,
+          decoration: const InputDecoration(
+            hintText: 'Write your reply...',
+            border: OutlineInputBorder(),
+          ),
+          maxLines: 3,
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (replyController.text.trim().isNotEmpty) {
+                _addNestedReply(announcementId, comment, reply, replyController.text.trim());
+                Navigator.pop(context);
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1C2D5E),
+            ),
+            child: const Text('Reply', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _addNestedReply(String announcementId, Map<String, dynamic> comment, 
+      Map<String, dynamic>? parentReply, String replyText) async {
+    if (replyText.trim().isEmpty) return;
+    
+    try {
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final username = userDoc.exists ? (userDoc.data()?['name'] ?? 'User') : 'User';
+      
+      // Check if current user is admin (you can modify this logic based on your admin check)
+      final isAdmin = false; // Replace with your admin check logic
+
+      final announcementRef = FirebaseFirestore.instance.collection('announcements').doc(announcementId);
+      final announcementDoc = await announcementRef.get();
+      final comments = List<Map<String, dynamic>>.from(announcementDoc.data()?['comments'] ?? []);
+
+      // Find the comment to add reply to
+      final commentIndex = comments.indexWhere((c) => 
+          c['timestamp'] == comment['timestamp'] && 
+          c['userId'] == comment['userId']);
+
+      if (commentIndex != -1) {
+        final replies = List<Map<String, dynamic>>.from(comments[commentIndex]['replies'] ?? []);
+        
+        // Create the new reply
+        final newReply = {
+          'userId': uid,
+          'username': username,
+          'text': replyText,
+          'timestamp': Timestamp.now(),
+          'isAdmin': isAdmin,
+          'replyTo': parentReply != null ? {
+            'userId': parentReply['userId'],
+            'username': parentReply['username'],
+            'text': parentReply['text']?.substring(0, min(30, parentReply['text']?.length ?? 0)) + '...',
+          } : {
+            'userId': comment['userId'],
+            'username': comment['username'],
+            'text': comment['text']?.substring(0, min(30, comment['text']?.length ?? 0)) + '...',
+          },
+        };
+        
+        replies.add(newReply);
+        comments[commentIndex]['replies'] = replies;
+        
+        await announcementRef.update({'comments': comments});
+        
+        // Mark as read
+        if (!readAnnouncements.contains(announcementId)) {
+          _markAsRead(announcementId);
+        }
+        
+        // Refresh UI
+        setState(() {});
+        
+        // Show success message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Reply posted to ${parentReply != null ? parentReply['username'] : comment['username']}')),
+        );
+      }
+    } catch (e) {
+      print('Error adding nested reply: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error adding reply: $e')),
+      );
+    }
+  }
+
+  // Helper function for min
+  int min(int a, int b) => a < b ? a : b;
+
+  Future<void> _showDeleteConfirmation(BuildContext context, String announcementId, 
+      Map<String, dynamic> comment, Map<String, dynamic>? reply) async {
+    return showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(reply == null ? 'Delete Comment' : 'Delete Reply'),
+        content: Text(reply == null 
+            ? 'Are you sure you want to delete this comment?' 
+            : 'Are you sure you want to delete this reply?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              _deleteCommentOrReply(announcementId, comment, reply);
+              Navigator.pop(context);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+            ),
+            child: const Text('Delete', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteCommentOrReply(String announcementId, 
+      Map<String, dynamic> comment, Map<String, dynamic>? reply) async {
+    try {
+      final announcementRef = FirebaseFirestore.instance.collection('announcements').doc(announcementId);
+      final announcementDoc = await announcementRef.get();
+      final comments = List<Map<String, dynamic>>.from(announcementDoc.data()?['comments'] ?? []);
+
+      // Find the comment index
+      final commentIndex = comments.indexWhere((c) => 
+          c['timestamp'] == comment['timestamp'] && 
+          c['userId'] == comment['userId']);
+
+      if (commentIndex != -1) {
+        if (reply == null) {
+          // Delete entire comment
+          comments.removeAt(commentIndex);
+        } else {
+          // Delete specific reply
+          final replies = List<Map<String, dynamic>>.from(comments[commentIndex]['replies'] ?? []);
+          final replyIndex = replies.indexWhere((r) => 
+              r['timestamp'] == reply['timestamp'] && 
+              r['userId'] == reply['userId']);
+          
+          if (replyIndex != -1) {
+            replies.removeAt(replyIndex);
+            comments[commentIndex]['replies'] = replies;
+          }
+        }
+
+        await announcementRef.update({'comments': comments});
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(reply == null ? 'Comment deleted' : 'Reply deleted')),
+        );
+      }
+    } catch (e) {
+      print('Error deleting: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error deleting: $e')),
+      );
+    }
+  }
+
+  Future<void> _addReply(String announcementId, Map<String, dynamic> comment, String replyText) async {
+    if (replyText.trim().isEmpty) return;
+    
+    try {
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final username = userDoc.exists ? (userDoc.data()?['name'] ?? 'User') : 'User';
+      
+      // Check if current user is admin (you can modify this logic based on your admin check)
+      final isAdmin = false; // Replace with your admin check logic
+
+      final announcementRef = FirebaseFirestore.instance.collection('announcements').doc(announcementId);
+      final announcementDoc = await announcementRef.get();
+      final comments = List<Map<String, dynamic>>.from(announcementDoc.data()?['comments'] ?? []);
+
+      // Find the comment to add reply to
+      final commentIndex = comments.indexWhere((c) => 
+          c['timestamp'] == comment['timestamp'] && 
+          c['userId'] == comment['userId']);
+
+      if (commentIndex != -1) {
+        final replies = List<Map<String, dynamic>>.from(comments[commentIndex]['replies'] ?? []);
+        
+        replies.add({
+          'userId': uid,
+          'username': username,
+          'text': replyText,
+          'timestamp': Timestamp.now(),
+          'isAdmin': isAdmin, // Set admin status
+        });
+
+        comments[commentIndex]['replies'] = replies;
+        
+        await announcementRef.update({'comments': comments});
+        
+        // Mark as read
+        if (!readAnnouncements.contains(announcementId)) {
+          _markAsRead(announcementId);
+        }
+        
+        // Refresh UI
+        setState(() {});
+      }
+    } catch (e) {
+      print('Error adding reply: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error adding reply: $e')),
+      );
+    }
+  }
+
   Future<void> _shareReferralOld(String referralCode) async {
     final String message = "Join Fitness Hub! 💪\n"
       "Use my referral code: $referralCode\n"
-      "New members get a special discount, and I'll earn a free month too! 🎉\n\n"
-      "Download the app here: https://play.google.com/store/apps/details?id=com.yourfitnessapp&referrer=referral_code%3D$referralCode";
+      "New members get a special discount 🎉\n\n"
+      "Download the app here: https://apps.apple.com/us/app/flex-facility/id6755446262";
     final String subject = "Fitness App Referral";
     await Share.share(message, subject: subject);
   }
@@ -248,8 +493,8 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
     
     final String message = "Join Fitness Hub! 💪\n"
       "Use my referral code: $userReferralCode\n"
-      "New members get a special discount, and I'll earn a free month too! 🎉\n\n"
-      "Download the app here: https://play.google.com/store/apps/details?id=com.yourfitnessapp&referrer=referral_code%3D$userReferralCode";
+      "New members get a special discount 🎉\n\n"
+      "Download the app here: https://apps.apple.com/us/app/flex-facility/id6755446262";
     final String subject = "Fitness App Referral";
     
     await Share.share(message, subject: subject);
@@ -259,8 +504,7 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
   Future<void> _copyReferralLink() async {
     if (userReferralCode == null) return;
     
-    final String referralLink = "https://play.google.com/store/apps/details?id=com.yourfitnessapp&referrer=referral_code%3D$userReferralCode";
-    await FlutterClipboard.copy(referralLink);
+    final String referralLink = "https://apps.apple.com/us/app/flex-facility/id6755446262";    await FlutterClipboard.copy(referralLink);
     
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Personalized referral link copied to clipboard!')),
@@ -275,8 +519,7 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
     final String message = "Join Fitness Hub! 💪\n"
       "Use my referral code: $userReferralCode\n"
       "New members get a special discount, and I'll earn a free month too! 🎉";
-    final String referralLink = "https://play.google.com/store/apps/details?id=com.yourfitnessapp&referrer=referral_code%3D$userReferralCode";
-    
+    final String referralLink = "https://apps.apple.com/us/app/flex-facility/id6755446262";    
     switch (platform) {
       case 'whatsapp':
         final encodedMessage = Uri.encodeComponent('$message\n$referralLink');
@@ -589,7 +832,7 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
                           text: const TextSpan(
                             children: [
                               TextSpan(
-                                text: "When your friend signs up using your code,\n",
+                                text: "When a friend signs up using your code,\n",
                                 style: TextStyle(color: Colors.white, fontSize: 16),
                               ),
                               TextSpan(
@@ -1837,78 +2080,371 @@ class _PostAnnouncementScreenState extends State<PostAnnouncementScreen> {
                     ),
                     
                     // Comments section
-                    if (comments.isNotEmpty)
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.grey[50],
-                          borderRadius: const BorderRadius.only(
-                            bottomLeft: Radius.circular(16),
-                            bottomRight: Radius.circular(16),
-                          ),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              "Comments",
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 15,
-                                color: Color(0xFF1C2D5E),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            ...comments.map((comment) {
-                              final commentTime = (comment['timestamp'] as Timestamp).toDate();
-                              return Container(
-                                margin: const EdgeInsets.only(bottom: 12),
-                                padding: const EdgeInsets.all(12),
+                    // Comments section - COLLAPSIBLE
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Column(
+                        children: [
+                          // Comments header with count and expand/collapse button
+                          if (comments.isNotEmpty)
+                            GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  if (_expandedComments.contains(docId)) {
+                                    _expandedComments.remove(docId);
+                                  } else {
+                                    _expandedComments.add(docId);
+                                  }
+                                });
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 12),
                                 decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(12),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.05),
-                                      blurRadius: 4,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
+                                  border: Border(
+                                    top: BorderSide(color: Colors.grey[300]!),
+                                    bottom: BorderSide(color: Colors.grey[300]!),
+                                  ),
                                 ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
                                     Row(
                                       children: [
+                                        const Icon(Icons.comment, size: 18, color: Color(0xFF1C2D5E)),
+                                        const SizedBox(width: 8),
                                         Text(
-                                          comment['username'] ?? 'Anonymous',
+                                          '${comments.length} Comments',
                                           style: const TextStyle(
                                             fontWeight: FontWeight.w600,
-                                            fontSize: 13,
-                                          ),
-                                        ),
-                                        const Spacer(),
-                                        Text(
-                                          DateFormat('MMM dd, yyyy').format(commentTime),
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            color: Colors.grey[600],
+                                            fontSize: 14,
+                                            color: Color(0xFF1C2D5E),
                                           ),
                                         ),
                                       ],
                                     ),
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      comment['text'] ?? '', 
-                                      style: const TextStyle(fontSize: 14),
+                                    Icon(
+                                      _expandedComments.contains(docId)
+                                          ? Icons.keyboard_arrow_up
+                                          : Icons.keyboard_arrow_down,
+                                      color: const Color(0xFF1C2D5E),
                                     ),
                                   ],
                                 ),
-                              );
-                            }).toList(),
-                          ],
-                        ),
+                              ),
+                            ),
+                          
+                          // Expanded comments section
+                          if (_expandedComments.contains(docId) && comments.isNotEmpty)
+                            Container(
+                              padding: const EdgeInsets.only(top: 12),
+                              child: ListView.builder(
+                                shrinkWrap: true,
+                                physics: const NeverScrollableScrollPhysics(),
+                                itemCount: comments.length,
+                                itemBuilder: (ctx, commentIndex) {
+                                  final comment = comments[commentIndex] as Map<String, dynamic>;
+                                  final commentTime = (comment['timestamp'] as Timestamp).toDate();
+                                  final replies = List<Map<String, dynamic>>.from(comment['replies'] ?? []);
+                                  final commentId = '${comment['timestamp']}-${comment['userId']}'; // Unique identifier
+                                  
+                                  return Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      // Main comment
+                                      Container(
+                                        margin: const EdgeInsets.only(bottom: 8),
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white,
+                                          borderRadius: BorderRadius.circular(12),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: Colors.black.withOpacity(0.05),
+                                              blurRadius: 4,
+                                              offset: const Offset(0, 2),
+                                            ),
+                                          ],
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Row(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                // User avatar/initial
+                                                CircleAvatar(
+                                                  radius: 16,
+                                                  backgroundColor: comment['isAdmin'] == true 
+                                                      ? const Color(0xFF1C2D5E)
+                                                      : Colors.grey[300],
+                                                  child: Text(
+                                                    (comment['username'] ?? 'U')[0].toUpperCase(),
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                      fontWeight: FontWeight.bold,
+                                                      color: comment['isAdmin'] == true ? Colors.white : Colors.black87,
+                                                    ),
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 10),
+                                                Expanded(
+                                                  child: Column(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    children: [
+                                                      Row(
+                                                        children: [
+                                                          Text(
+                                                            comment['username'] ?? 'Anonymous',
+                                                            style: TextStyle(
+                                                              fontWeight: FontWeight.w600,
+                                                              fontSize: 13,
+                                                              color: comment['isAdmin'] == true 
+                                                                  ? const Color(0xFF1C2D5E) 
+                                                                  : Colors.black,
+                                                            ),
+                                                          ),
+                                                          const SizedBox(width: 6),
+                                                          if (comment['isAdmin'] == true) ...[
+                                                            Container(
+                                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                              decoration: BoxDecoration(
+                                                                color: const Color(0xFF1C2D5E),
+                                                                borderRadius: BorderRadius.circular(4),
+                                                              ),
+                                                              child: const Text(
+                                                                'ADMIN',
+                                                                style: TextStyle(
+                                                                  color: Colors.white,
+                                                                  fontSize: 9,
+                                                                  fontWeight: FontWeight.bold,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                          ],
+                                                          const Spacer(),
+                                                          Text(
+                                                            DateFormat('MMM dd, yyyy').format(commentTime),
+                                                            style: TextStyle(
+                                                              fontSize: 11,
+                                                              color: Colors.grey[600],
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                      const SizedBox(height: 6),
+                                                      Text(
+                                                        comment['text'] ?? '', 
+                                                        style: const TextStyle(fontSize: 14),
+                                                      ),
+                                                      const SizedBox(height: 8),
+                                                      // Comment actions
+                                                      Row(
+                                                        children: [
+                                                          // Reply button
+                                                          // Find the reply button in the comments section (around line 1498) and replace it with:
+                                                          TextButton.icon(
+                                                            onPressed: () {
+                                                              _showReplyDialog(context, docId, comment);
+                                                            },
+                                                            icon: Icon(Icons.reply, size: 16, color: Colors.grey[600]),
+                                                            label: Text(
+                                                              'Reply',
+                                                              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                                                            ),
+                                                            style: TextButton.styleFrom(
+                                                              padding: EdgeInsets.zero,
+                                                              minimumSize: const Size(50, 30),
+                                                            ),
+                                                          ),
+                                                          const SizedBox(width: 16),
+                                                          // Delete button (only for comment owner or admin)
+                                                          if (comment['userId'] == FirebaseAuth.instance.currentUser?.uid || 
+                                                              comment['isAdmin'] == true)
+                                                            TextButton.icon(
+                                                              onPressed: () {
+                                                                _showDeleteConfirmation(context, docId, comment, null);
+                                                              },
+                                                              icon: Icon(Icons.delete_outline, size: 16, color: Colors.red[300]),
+                                                              label: Text(
+                                                                'Delete',
+                                                                style: TextStyle(fontSize: 12, color: Colors.red[300]),
+                                                              ),
+                                                              style: TextButton.styleFrom(
+                                                                padding: EdgeInsets.zero,
+                                                                minimumSize: const Size(50, 30),
+                                                              ),
+                                                            ),
+                                                        ],
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      
+                                      // Replies to this comment
+                                      if (replies.isNotEmpty)
+                                        Padding(
+                                          padding: const EdgeInsets.only(left: 32, top: 4, bottom: 8),
+                                          child: Column(
+                                            children: replies.map((reply) {
+                                              final replyTime = (reply['timestamp'] as Timestamp).toDate();
+                                              return Container(
+                                                margin: const EdgeInsets.only(bottom: 8),
+                                                padding: const EdgeInsets.all(10),
+                                                decoration: BoxDecoration(
+                                                  color: reply['isAdmin'] == true 
+                                                      ? const Color(0xFF1C2D5E).withOpacity(0.05)
+                                                      : Colors.grey[50],
+                                                  borderRadius: BorderRadius.circular(10),
+                                                  border: Border.all(
+                                                    color: reply['isAdmin'] == true 
+                                                        ? const Color(0xFF1C2D5E).withOpacity(0.2)
+                                                        : Colors.grey[200]!,
+                                                  ),
+                                                ),
+                                                child: Row(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    // Reply avatar - smaller
+                                                    CircleAvatar(
+                                                      radius: 12,
+                                                      backgroundColor: reply['isAdmin'] == true 
+                                                          ? const Color(0xFF1C2D5E)
+                                                          : Colors.grey[400],
+                                                      child: Text(
+                                                        (reply['username'] ?? 'U')[0].toUpperCase(),
+                                                        style: TextStyle(
+                                                          fontSize: 10,
+                                                          fontWeight: FontWeight.bold,
+                                                          color: reply['isAdmin'] == true ? Colors.white : Colors.white,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Expanded(
+                                                      child: Column(
+                                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                                        children: [
+                                                          Row(
+                                                            children: [
+                                                              Text(
+                                                                reply['username'] ?? 'User',
+                                                                style: TextStyle(
+                                                                  fontWeight: FontWeight.w600,
+                                                                  fontSize: 12,
+                                                                  color: reply['isAdmin'] == true 
+                                                                      ? const Color(0xFF1C2D5E) 
+                                                                      : Colors.black,
+                                                                ),
+                                                              ),
+                                                              // Add this new section for "replying to" information
+                                                              if (reply['replyTo'] != null) ...[
+                                                                const SizedBox(height: 2),
+                                                                Container(
+                                                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                                  decoration: BoxDecoration(
+                                                                    color: Colors.grey[200],
+                                                                    borderRadius: BorderRadius.circular(4),
+                                                                  ),
+                                                                  child: Row(
+                                                                    mainAxisSize: MainAxisSize.min,
+                                                                    children: [
+                                                                      Icon(Icons.reply, size: 10, color: Colors.grey[600]),
+                                                                      const SizedBox(width: 2),
+                                                                      Text(
+                                                                        'Replying to @${reply['replyTo']['username']}',
+                                                                        style: TextStyle(
+                                                                          fontSize: 9,
+                                                                          color: Colors.grey[600],
+                                                                          fontStyle: FontStyle.italic,
+                                                                        ),
+                                                                      ),
+                                                                    ],
+                                                                  ),
+                                                                ),
+                                                              ],
+                                                              const SizedBox(width: 6),
+                                                              if (reply['isAdmin'] == true) ...[
+                                                                Container(
+                                                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                                                  decoration: BoxDecoration(
+                                                                    color: const Color(0xFF1C2D5E),
+                                                                    borderRadius: BorderRadius.circular(3),
+                                                                  ),
+                                                                ),
+                                                              ],
+                                                              const Spacer(),
+                                                              Text(
+                                                                DateFormat('MMM dd').format(replyTime),
+                                                                style: TextStyle(
+                                                                  fontSize: 9,
+                                                                  color: Colors.grey[500],
+                                                                ),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                          const SizedBox(height: 4),
+                                                          Text(
+                                                            reply['text'] ?? '',
+                                                            style: const TextStyle(fontSize: 13),
+                                                          ),
+                                                          const SizedBox(height: 4),
+                                                          // Delete reply button
+                                                          // Reply button for nested replies
+                                                          TextButton.icon(
+                                                            onPressed: () {
+                                                              _showReplyDialog(context, docId, comment, reply: reply);
+                                                            },
+                                                            icon: Icon(Icons.reply, size: 12, color: Colors.grey[500]),
+                                                            label: Text(
+                                                              'Reply',
+                                                              style: TextStyle(fontSize: 10, color: Colors.grey[500]),
+                                                            ),
+                                                            style: TextButton.styleFrom(
+                                                              padding: EdgeInsets.zero,
+                                                              minimumSize: const Size(40, 20),
+                                                            ),
+                                                          ),
+                                                          const SizedBox(width: 8),
+                                                          // Delete reply button
+                                                          if (reply['userId'] == FirebaseAuth.instance.currentUser?.uid || 
+                                                              comment['isAdmin'] == true)
+                                                            TextButton(
+                                                              onPressed: () {
+                                                                _showDeleteConfirmation(context, docId, comment, reply);
+                                                              },
+                                                              style: TextButton.styleFrom(
+                                                                padding: EdgeInsets.zero,
+                                                                minimumSize: const Size(40, 20),
+                                                              ),
+                                                              child: Text(
+                                                                'Delete',
+                                                                style: TextStyle(fontSize: 10, color: Colors.red[300]),
+                                                              ),
+                                                            ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              );
+                                            }).toList(),
+                                          ),
+                                        ),
+                                      
+                                      const SizedBox(height: 8),
+                                    ],
+                                  );
+                                },
+                              ),
+                            ),
+                        ],
                       ),
+                    ),
                     
                     // Add comment section
                     Container(
