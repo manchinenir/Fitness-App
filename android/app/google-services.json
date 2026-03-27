@@ -14,6 +14,30 @@
       },
       "oauth_client": [
         {
+          "client_id": "710819384507-l68sunp540ne4p6nmts007a8ok59i9iv.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.flexfacility.app",
+            "certificate_hash": "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+          }
+        },
+        {
+          "client_id": "710819384507-nqhbgkeg2thhad7fmn7n5cvc76fqrlkl.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.flexfacility.app",
+            "certificate_hash": "0b7b748f8b0c5e4ace447bb0848de69013df42c8"
+          }
+        },
+        {
+          "client_id": "710819384507-u090fu5btsgvfijcrequr3mldacv799e.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.flexfacility.app",
+            "certificate_hash": "a0278d21c0e805e7c3556f55cd8e8676d2dbd5a2"
+          }
+        },
+        {
           "client_id": "710819384507-e7t1lose3a27bi4kvkvcdioiret2r9r3.apps.googleusercontent.com",
           "client_type": 3
         }
@@ -29,6 +53,49 @@
             {
               "client_id": "710819384507-e7t1lose3a27bi4kvkvcdioiret2r9r3.apps.googleusercontent.com",
               "client_type": 3
+            },
+            {
+              "client_id": "710819384507-00ouoj468ou5lrlcosgld7rcolke6i46.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.flexfacility.app"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:710819384507:android:bfa6db29bbb8af99d7ad9e",
+        "android_client_info": {
+          "package_name": "com.yourcompany.flexfacility"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "710819384507-e7t1lose3a27bi4kvkvcdioiret2r9r3.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCQ-747zx0zDzgkuW3DPCO8sWo_Ft_J2_o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "710819384507-e7t1lose3a27bi4kvkvcdioiret2r9r3.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "710819384507-00ouoj468ou5lrlcosgld7rcolke6i46.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.flexfacility.app"
+              }
             }
           ]
         }

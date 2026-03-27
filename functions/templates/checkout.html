@@ -1,379 +1,323 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Secure Payment</title>
-  <script src="https://web.squarecdn.com/v1/square.js"></script>
-  <style>
-    :root{
-      --primary:#1C2D5E;--primary-light:#2a3f7a;
-      --success:#0a6;--error:#d32f2f;--text:#333;
-      --background:#f5f7fb;--surface:#fff;--border:#e7e9ef;
-      --shadow:0 10px 30px rgba(0,0,0,.08)
-    }
-    *{margin:0;padding:0;box-sizing:border-box}
-    body{
-      font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
-      background:var(--background);color:var(--text);
-      min-height:100vh;display:flex;align-items:center;justify-content:center;
-      padding:20px
-    }
-    .container{max-width:560px;width:100%}
-    .card{
-      background:var(--surface);border-radius:20px;
-      padding:28px;box-shadow:var(--shadow);border:1px solid var(--border)
-    }
-    .header{
-      display:flex;justify-content:space-between;align-items:center;margin-bottom:18px
-    }
-    .brand{display:flex;gap:10px;align-items:center}
-    .logo{
-      width:36px;height:36px;border-radius:10px;
-      background:linear-gradient(135deg,var(--primary),var(--primary-light))
-    }
-    .title{font-weight:800;font-size:18px;color:var(--primary)}
-    .price-badge{
-      background:linear-gradient(135deg,var(--primary),var(--primary-light));
-      color:#fff;padding:10px 14px;border-radius:12px;
-      font-weight:700;white-space:nowrap
-    }
-    .section{margin-top:18px}
-    .section h3{font-size:14px;color:var(--primary);letter-spacing:.4px;margin-bottom:10px}
-    .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-    .input{display:flex;flex-direction:column;gap:6px}
-    .input label{font-size:11px;color:#57607a;white-space:normal;word-break:break-word}
-    .input input,
-    .input select{
-      padding:12px;border:1px solid var(--border);border-radius:12px;
-      font-size:14px;background:#fbfcff;width:100%;appearance:none
-    }
-    .input input:focus,
-    .input select:focus{
-      border-color:var(--primary);
-      box-shadow:0 0 0 4px rgba(28,45,94,.10);outline:none
-    }
-    #card-container{
-      border:1.5px dashed var(--border);border-radius:14px;
-      padding:14px;background:#fff;min-height:62px;display:flex;align-items:center
-    }
-    .card-placeholder{font-size:13px;color:#9aa1b7}
-    .btn{
-      width:100%;padding:14px 16px;border:none;border-radius:14px;
-      font-size:16px;font-weight:700;cursor:pointer;
-      display:flex;align-items:center;justify-content:center;gap:10px;
-      margin-top:14px;background:var(--primary);color:#fff
-    }
-    .btn.secondary{background:#000}
-    .btn:disabled{opacity:.6;cursor:not-allowed}
-    .message{
-      border-radius:12px;padding:12px;margin-top:14px;
-      font-size:14px;display:none
-    }
-    .message.error{
-      background:rgba(211,47,47,.06);color:var(--error);
-      border:1px solid rgba(211,47,47,.2);display:block
-    }
-    .message.success{
-      background:rgba(10,102,0,.06);color:var(--success);
-      border:1px solid rgba(10,102,0,.2);display:block
-    }
-    .footnote{margin-top:10px;text-align:center;color:#8b91a6;font-size:12px}
-    #payLoading{
-      width:18px;height:18px;border:2px solid transparent;
-      border-top:2px solid #fff;border-radius:50%;animation:spin 1s linear infinite
-    }
-    @keyframes spin{to{transform:rotate(360deg)}}
-    @media (max-width:480px){
-      .card{padding:20px;border-radius:16px}
-      .title{font-size:16px}
-      .price-badge{padding:8px 10px;font-size:13px}
-      .row{grid-template-columns:1fr}
-    }
-    .success-panel{
-      display:none;margin-top:14px;padding:18px;
-      border-radius:14px;border:1px solid rgba(10,102,0,.2);
-      background:rgba(10,102,0,.06)
-    }
-    .success-panel h4{margin-bottom:6px}
-    .return-btn{margin-top:12px;background:#0a6}
-    hr.section-divider{
-      border:none;border-top:1px solid #e0e2eb;margin:18px 0 6px 0
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="card" id="checkoutCard">
-      <div class="header">
-        <div class="brand">
-          <div class="logo"></div>
-          <div class="title">Flex Facility • Checkout</div>
-        </div>
-        <div class="price-badge" id="amountDisplay">$0.00</div>
-      </div>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Flex Facility Checkout</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-      <div id="formArea">
-        <!-- Express checkout (Apple Pay only now) -->
-        <div class="section">
-          <h3>Express checkout</h3>
-          <button id="applePayBtn" class="btn secondary" type="button" style="display:none">
-             Apple Pay
-          </button>
-        </div>
+    <!-- Square Web Payments SDK – production -->
+    <script src="https://web.squarecdn.com/v1/square.js"></script>
 
-        <hr class="section-divider"/>
-
-        <!-- Contact -->
-        <div class="section">
-          <h3>Contact</h3>
-          <div class="row">
-            <div class="input">
-              <label for="phoneCountry">Country</label>
-              <select id="phoneCountry">
-                <option value="+1" selected>+1 United States</option>
-                <option value="+44">+44 United Kingdom</option>
-                <option value="+61">+61 Australia</option>
-                <option value="+49">+49 Germany</option>
-                <option value="+33">+33 France</option>
-                <option value="+34">+34 Spain</option>
-                <option value="+39">+39 Italy</option>
-                <option value="+91">+91 India</option>
-                <option value="+81">+81 Japan</option>
-              </select>
-            </div>
-            <div class="input">
-              <label for="phone">Phone number</label>
-              <input id="phone" type="tel" placeholder="555 123 4567"/>
-            </div>
-          </div>
-          <div class="row">
-            <div class="input" style="grid-column:1 / -1">
-              <label for="email">Email address for receipt</label>
-              <input id="email" type="email" placeholder="jane@example.com"/>
-            </div>
-          </div>
-          <div class="row">
-            <div class="input">
-              <label for="firstName">First name</label>
-              <input id="firstName" type="text" placeholder="Jane"/>
-            </div>
-            <div class="input">
-              <label for="lastName">Last name</label>
-              <input id="lastName" type="text" placeholder="Doe"/>
-            </div>
-          </div>
-        </div>
-
-        <!-- Payment -->
-        <hr class="section-divider"/>
-        <div class="section">
-          <h3>Payment</h3>
-          <p style="font-size:12px;color:#676d80;margin-bottom:8px">
-            All transactions are secure and encrypted.
-          </p>
-          <div id="card-container"><div class="card-placeholder">Card number • MM/YY • CVV</div></div>
-          <button id="payBtn" class="btn" type="button">
-            <span id="payText">Pay Now</span>
-            <div id="payLoading" style="display:none"></div>
-          </button>
-        </div>
-
-        <div id="message" class="message"></div>
-      </div>
-
-      <!-- Success screen -->
-      <div id="successPanel" class="success-panel">
-        <h4>✅ Payment successful</h4>
-        <div id="successText" style="font-size:14px;color:#0a6">
-          Your plan is now active. You can return to the app.
-        </div>
-        <a id="returnDeepLink" class="btn return-btn" href="#">Return to App</a>
-        <div class="footnote" style="margin-top:8px">
-          You can also close this tab and switch back to the app.
-        </div>
-      </div>
-
-      <div class="footnote">Secured by Square</div>
-    </div>
-  </div>
-
-  <script>
-    const $ = (id) => document.getElementById(id);
-    const fmt = (c) => `$${(c/100).toFixed(2)}`;
-    const setLoading = (v)=>{
-      $('payBtn').disabled=v;
-      $('payText').style.display = v ? 'none' : '';
-      $('payLoading').style.display = v ? '' : 'none';
-    };
-    const showMsg = (t,type="error")=>{
-      const el=$('message');
-      el.textContent=t;
-      el.className=`message ${type}`;
-      el.style.display='block';
-    };
-    const postToFlutter = (p)=> {
-      const s = JSON.stringify(p);
-      if (window.SquareBridge?.postMessage) window.SquareBridge.postMessage(s);
-      else try { location.href = 'sqbridge://message?data=' + encodeURIComponent(s); } catch(_) {}
-    };
-
-    function collectBuyer(qs) {
-      return {
-        userId: qs.get('userId') || '',
-        planId: qs.get('planId') || '',
-        planName: qs.get('planName') || 'Training Plan',
-        planCategory: qs.get('planCategory') || '',
-        description: qs.get('planDescription') || qs.get('description') || '',
-        price: Number(qs.get('priceDollars') || qs.get('price') || '0'),
-        sessions: Number(qs.get('sessions') || '0'),
-        type: qs.get('type') || '',
-        isPdf: qs.get('isPdf') === 'true',
-        firstName: $('firstName').value.trim() || qs.get('firstName') || '',
-        lastName:  $('lastName').value.trim()  || qs.get('lastName')  || '',
-        email:     $('email').value.trim()     || qs.get('email')     || '',
-        phone:      $('phone').value.trim() || qs.get('phone') || '',
-        phoneCountry: $('phoneCountry').value || qs.get('phoneCountry') || ''
-      };
-    }
-
-    async function chargeServer(apiUrl, payload) {
-      const resp = await fetch(apiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Accept": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const data = await resp.json().catch(()=>({}));
-
-      if (!resp.ok || !data.ok) {
-        const raw = data.error || data.message || `Payment failed (HTTP ${resp.status})`;
-        const msg = (typeof raw === 'string' && raw.length > 200)
-          ? "Payment failed. Please check your card or try another one."
-          : raw;
-        showMsg(msg,"error");
-        postToFlutter({ ok:false, error: msg, status: resp.status });
-        return false;
+    <style>
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        background: #f3f4f6;
+        margin: 0;
+        padding: 0;
       }
+      .page {
+        max-width: 420px;
+        margin: 40px auto;
+        background: #ffffff;
+        border-radius: 16px;
+        box-shadow: 0 10px 25px rgba(15, 23, 42, 0.12);
+        padding: 24px 20px 28px;
+      }
+      .title {
+        font-size: 20px;
+        font-weight: 700;
+        color: #111827;
+        margin-bottom: 4px;
+      }
+      .subtitle {
+        font-size: 13px;
+        color: #6b7280;
+        margin-bottom: 16px;
+      }
+      .amount {
+        font-size: 24px;
+        font-weight: 700;
+        color: #16a34a;
+        margin-bottom: 20px;
+      }
+      .label {
+        font-size: 13px;
+        color: #6b7280;
+        margin-bottom: 4px;
+      }
+      #card-section {
+        margin-top: 16px;
+      }
+      #card-container {
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 10px 12px;
+        margin-bottom: 12px;
+      }
+      button.primary {
+        width: 100%;
+        padding: 12px 16px;
+        border-radius: 999px;
+        border: none;
+        background: #2563eb;
+        color: white;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.primary:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+      /* Apple Pay button style */
+      button.apple-pay {
+        width: 100%;
+        padding: 12px 16px;
+        border-radius: 999px;
+        border: none;
+        background: #000;
+        color: white;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      .status {
+        margin-top: 14px;
+        font-size: 13px;
+        color: #6b7280;
+      }
+      .status.error {
+        color: #b91c1c;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="title" id="plan-title">Flex Facility Plan</div>
+      <div class="subtitle" id="plan-subtitle">
+        Secure checkout powered by Square
+      </div>
+      <div class="amount" id="amount-text">$0.00</div>
 
-      $('formArea').style.display = 'none';
-      $('successPanel').style.display = 'block';
-      showMsg("Payment processed successfully!","success");
-      postToFlutter({ ok:true, paymentId:data.paymentId, result:data.result });
+      <!-- APPLE PAY (if available) -->
+      <div id="apple-section" style="display:none;">
+        <div class="label">Pay with Apple Pay</div>
+        <div id="apple-pay-container"></div>
+      </div>
 
-      const qs = new URLSearchParams(location.search);
-      const ref = (qs.get('ref') || '').slice(0,40);
-      const deep = `flexfacility://purchase/success?ref=${encodeURIComponent(ref)}`;
-      $('returnDeepLink').href = deep;
+      <!-- CARD SECTION ONLY -->
+      <div id="card-section">
+        <div class="label">Pay with card</div>
+        <div id="card-container"></div>
+        <button id="card-pay-button" class="primary">
+          Pay with card
+        </button>
+      </div>
 
-      try {
-        const url = new URL(window.location.href);
-        url.searchParams.set('ff_status', 'success');
-        window.history.replaceState({}, "", url.toString());
-      } catch (_){}
+      <div id="status" class="status"></div>
+    </div>
 
-      return true;
-    }
+    <script>
+      (async function () {
+        const params = new URLSearchParams(window.location.search);
 
-    (async () => {
-      try {
-        const qs = new URLSearchParams(location.search);
-        const APP_ID = qs.get("appId");
-        const LOCATION_ID = qs.get("locationId");
-        const AMOUNT_CENTS = Number(qs.get("amountCents") || "0");
-        const API_URL = decodeURIComponent(qs.get("apiUrl") || "process-payment");
-        const WALLET = qs.get("wallet");
+        const appId = params.get("appId");
+        const locationId = params.get("locationId");
+        const env = params.get("env") || "production";
+        const apiUrl =
+          params.get("apiUrl") ||
+          // fallback: same origin /process-payment if not provided
+          window.location.origin + "/api/process-payment";
 
-        $('firstName').value = qs.get('firstName') || '';
-        $('lastName').value  = qs.get('lastName')  || '';
-        $('email').value     = qs.get('email')     || '';
+        const planName = params.get("planName") || "Fitness Plan";
+        const amountCents = parseInt(params.get("amountCents") || "0", 10);
 
-        $('amountDisplay').textContent = fmt(AMOUNT_CENTS);
-        if (!APP_ID || !LOCATION_ID) throw new Error("Missing appId/locationId");
-        if (AMOUNT_CENTS <= 0) throw new Error("Invalid amount");
-        if (!window.Square?.payments) throw new Error("Square SDK failed to load");
+        const userId = params.get("userId") || "";
+        const planId = params.get("planId") || "";
+        const sessions = parseInt(params.get("sessions") || "0", 10);
+        const priceDollarsParam = params.get("priceDollars");
+        const priceDollars = priceDollarsParam
+          ? parseFloat(priceDollarsParam)
+          : amountCents / 100.0;
+        const planCategory = params.get("planCategory") || "";
+        const planDescription = params.get("planDescription") || "";
+        const email = params.get("email") || "";
+        const firstName = params.get("firstName") || "";
+        const lastName = params.get("lastName") || "";
+        const ref = params.get("ref") || "";
 
-        const payments = window.Square.payments(APP_ID, LOCATION_ID);
+        const amountStr = (amountCents / 100).toFixed(2);
 
-        /* Apple Pay (optional) */
-        try {
-          const applePay = await payments.applePay({
-            countryCode:"US",
-            currencyCode:"USD",
-            merchantId:"REPLACE_WITH_YOUR_APPLE_PAY_MERCHANT_ID"
-          });
-          const canUse = await applePay.canMakePayment();
-          if (canUse) {
-            const btn = $('applePayBtn');
-            btn.style.display = '';
-            btn.addEventListener('click', async () => {
-              setLoading(true); $('message').style.display='none';
-              try {
-                const result = await applePay.tokenize({
-                  total:{ amount:(AMOUNT_CENTS/100).toFixed(2), label:"Flex Facility" }
-                });
-                if (result.status !== "OK") {
-                  throw new Error(result.errors?.[0]?.message || "Apple Pay failed");
-                }
-                await chargeServer(API_URL, {
-                  token: result.token,
-                  amountCents: AMOUNT_CENTS,
-                  locationId: LOCATION_ID,
-                  referenceId: (qs.get('ref') || '').slice(0,40),
-                  buyer: collectBuyer(qs)
-                });
-              } catch (err) {
-                showMsg(err.message || "Apple Pay error","error");
-                postToFlutter({ ok:false, error: err.message || String(err) });
-              } finally { setLoading(false); }
-            });
-            if (WALLET === 'apple') setTimeout(() => btn.click(), 120);
-          }
-        } catch(e){
-          console.warn("Apple Pay not available:", e);
+        const planTitleEl = document.getElementById("plan-title");
+        const amountTextEl = document.getElementById("amount-text");
+        const statusEl = document.getElementById("status");
+        const cardSection = document.getElementById("card-section");
+        const appleSection = document.getElementById("apple-section");
+        const appleContainer = document.getElementById("apple-pay-container");
+
+        planTitleEl.textContent = planName;
+        amountTextEl.textContent = "$" + amountStr;
+
+        function setStatus(msg, isError) {
+          statusEl.textContent = msg || "";
+          statusEl.classList.toggle("error", !!isError);
         }
 
-        /* Card */
-        const card = await payments.card();
-        await card.attach("#card-container");
-        $('card-container').querySelector('.card-placeholder')?.remove?.();
+        if (!window.Square) {
+          setStatus("Square.js failed to load.", true);
+          return;
+        }
+        if (!appId || !locationId || !apiUrl) {
+          setStatus("Missing checkout configuration.", true);
+          return;
+        }
 
-        $('payBtn').addEventListener('click', async () => {
-          setLoading(true); $('message').style.display='none';
+        const payments = window.Square.payments(appId, locationId);
+        let card;
+
+        async function createCard() {
+          card = await payments.card();
+          await card.attach("#card-container");
+          cardSection.style.display = "block";
+        }
+
+        async function sendPayment(token) {
+          setStatus("Processing payment…");
+          const payButton = document.getElementById("card-pay-button");
+          const appleBtn = document.getElementById("apple-pay-button");
+          if (payButton) payButton.disabled = true;
+          if (appleBtn) appleBtn.disabled = true;
+
+          const body = {
+            token: { id: token },
+            amountCents,
+            currency: "USD",
+            locationId,
+            planName,
+            buyer: {
+              userId,
+              planId,
+              sessions,
+              price: priceDollars,
+              planCategory,
+              description: planDescription,
+              email,
+              firstName,
+              lastName,
+            },
+            billingDetails: {},
+            referenceId: ref || undefined,
+          };
+
           try {
-            const tok = await card.tokenize();
-            if (tok.status !== "OK") throw new Error(tok.errors?.[0]?.message || "Card tokenization failed");
-
-            let verificationToken;
-            try {
-              const vr = await payments.verifyBuyer(tok.token, {
-                amount:(AMOUNT_CENTS/100).toFixed(2),
-                currencyCode:"USD",
-                intent:"CHARGE"
-              });
-              verificationToken = vr?.token;
-            } catch(e){ console.warn("verifyBuyer:", e); }
-
-            await chargeServer(API_URL, {
-              token: tok.token,
-              verificationToken,
-              amountCents: AMOUNT_CENTS,
-              locationId: LOCATION_ID,
-              referenceId: (qs.get('ref') || '').slice(0,40),
-              buyer: collectBuyer(qs)
+            const res = await fetch(apiUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "x-square-env": env,
+              },
+              body: JSON.stringify(body),
             });
-          } catch (err) {
-            showMsg(err.message || "Payment error","error");
-            postToFlutter({ ok:false, error: err.message || String(err) });
-          } finally { setLoading(false); }
-        });
 
-      } catch (err) {
-        showMsg("Initialization failed: " + (err.message || err), "error");
-        postToFlutter({ ok:false, error: "Initialization failed: " + (err.message || err) });
-        $('payBtn').disabled = true;
-        $('payText').textContent = "Payment Unavailable";
-      }
-    })();
-  </script>
-</body>
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+              const msg =
+                data && data.error
+                  ? data.error
+                  : "Payment failed. Please try another card.";
+              setStatus(msg, true);
+              if (payButton) payButton.disabled = false;
+              if (appleBtn) appleBtn.disabled = false;
+              return;
+            }
+
+            setStatus("Payment successful! You can close this page.", false);
+          } catch (e) {
+            console.error("process-payment error:", e);
+            setStatus(
+              "Network error while processing payment. Please try again.",
+              true
+            );
+            if (payButton) payButton.disabled = false;
+            if (appleBtn) appleBtn.disabled = false;
+          }
+        }
+
+        // Card pay button handler
+        document
+          .getElementById("card-pay-button")
+          .addEventListener("click", async (e) => {
+            e.preventDefault();
+            if (!card) return;
+            setStatus("Processing card…");
+            const result = await card.tokenize();
+            if (result.status !== "OK") {
+              setStatus("Card was declined or cancelled.", true);
+              return;
+            }
+            await sendPayment(result.token);
+          });
+
+        // Apple Pay integration
+        try {
+          const applePay = await payments.applePay();
+          const canUseApplePay = await applePay.canMakePayment();
+          if (canUseApplePay) {
+            appleSection.style.display = "block";
+
+            // Create a simple Apple Pay-style button
+            const btn = document.createElement("button");
+            btn.id = "apple-pay-button";
+            btn.className = "apple-pay";
+            btn.type = "button";
+            // You can replace text with a logo if desired
+            btn.innerHTML = "Pay with Apple Pay";
+            appleContainer.appendChild(btn);
+
+            btn.addEventListener("click", async () => {
+              setStatus("Initializing Apple Pay…");
+              btn.disabled = true;
+              try {
+                // Build a minimal payment request object for tokenize.
+                // Square's applePay.tokenize accepts an object with total, countryCode, currencyCode.
+                const paymentRequest = {
+                  countryCode: "US",
+                  currencyCode: "USD",
+                  total: {
+                    label: planName,
+                    amount: amountStr,
+                  },
+                };
+
+                const result = await applePay.tokenize(paymentRequest);
+                if (result.status !== "OK") {
+                  setStatus("Apple Pay authorization failed or was cancelled.", true);
+                  btn.disabled = false;
+                  return;
+                }
+
+                // result.token is a payment token string
+                await sendPayment(result.token);
+              } catch (err) {
+                console.error("Apple Pay error:", err);
+                setStatus("Apple Pay error. Please try again.", true);
+                btn.disabled = false;
+              }
+            });
+          }
+        } catch (e) {
+          // If applePay() is not supported on the platform, just skip it silently
+          console.info("Apple Pay not available:", e);
+        }
+
+        await createCard();
+      })();
+    </script>
+  </body>
 </html>
