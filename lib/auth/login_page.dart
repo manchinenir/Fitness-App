@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
@@ -22,6 +23,7 @@ class _LoginPageState extends State<LoginPage> {
   bool isLoading = false;
   bool isSendingResetEmail = false;
   bool isVerifyingEmail = false;
+  bool isGoogleLoading = false;
   String errorMessage = '';
   String successMessage = '';
   bool _obscurePassword = true;
@@ -300,6 +302,86 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  Future<void> _signInWithGoogle() async {
+    setState(() {
+      isGoogleLoading = true;
+      errorMessage = '';
+      successMessage = '';
+    });
+
+    try {
+      final GoogleSignIn googleSignIn = GoogleSignIn();
+      final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
+
+      if (googleUser == null) {
+        setState(() {
+          isGoogleLoading = false;
+        });
+        return;
+      }
+
+      final GoogleSignInAuthentication googleAuth =
+          await googleUser.authentication;
+
+      if (googleAuth.idToken == null) {
+        throw Exception('Google sign-in failed. Missing identity token.');
+      }
+
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      final userCredential = await _auth.signInWithCredential(credential);
+      final user = userCredential.user;
+
+      if (user == null) {
+        throw Exception('Google sign-in failed. User is unavailable.');
+      }
+
+      final userRef = _firestore.collection('users').doc(user.uid);
+      final userDoc = await userRef.get();
+
+      if (!userDoc.exists) {
+        await userRef.set({
+          'email': user.email ?? '',
+          'name': user.displayName ?? '',
+          'role': 'client',
+          'isActive': true,
+          'created_at': FieldValue.serverTimestamp(),
+          'updated_at': FieldValue.serverTimestamp(),
+        });
+      }
+
+      final refreshedDoc = await userRef.get();
+      final data = refreshedDoc.data() as Map<String, dynamic>? ?? {};
+
+      final isActive = data['isActive'] ?? true;
+      final deactivatedBy = data['deactivatedBy'] ?? 'client';
+
+      if (!isActive && deactivatedBy == 'admin') {
+        await _auth.signOut();
+        throw Exception('Your account has been blocked by admin.');
+      }
+
+      final role = data['role'] ?? 'client';
+      final emailFromDoc = (data['email'] ?? user.email ?? '').toString();
+      final userName = emailFromDoc.contains('@')
+          ? emailFromDoc.split('@').first
+          : (user.displayName ?? 'user');
+
+      _navigateBasedOnRole(role, userName);
+    } on FirebaseAuthException catch (e) {
+      setState(() => errorMessage = _getErrorMessage(e.code));
+    } catch (e) {
+      setState(() => errorMessage = e.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      setState(() {
+        isGoogleLoading = false;
+      });
+    }
+  }
+
   String _getErrorMessage(String code) {
     switch (code) {
       case 'user-not-found':
@@ -503,6 +585,42 @@ class _LoginPageState extends State<LoginPage> {
                                   color: Colors.white,
                                   fontSize: 16,
                                   fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: OutlinedButton.icon(
+                        onPressed: isGoogleLoading ? null : _signInWithGoogle,
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(color: Colors.grey[400]!),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        icon: const Icon(
+                          Icons.g_mobiledata,
+                          color: Colors.red,
+                          size: 30,
+                        ),
+                        label: isGoogleLoading
+                            ? SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: navyBlue,
+                                ),
+                              )
+                            : Text(
+                                'Continue with Google',
+                                style: TextStyle(
+                                  color: Colors.grey[800],
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
                       ),

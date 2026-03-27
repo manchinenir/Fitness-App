@@ -825,6 +825,7 @@ class _SubscriptionPaymentPageState extends State<SubscriptionPaymentPage> {
     String? firstName,
     String? lastName,
     String? email,
+    String? wallet,
     String? userId, // 👈 add this
   }) {
     const env = 'production';
@@ -856,6 +857,7 @@ class _SubscriptionPaymentPageState extends State<SubscriptionPaymentPage> {
       if (firstName != null && firstName.isNotEmpty) 'firstName': firstName,
       if (lastName != null && lastName.isNotEmpty) 'lastName': lastName,
       if (email != null && email.isNotEmpty) 'email': email,
+      if (wallet != null && wallet.isNotEmpty) 'wallet': wallet,
     };
 
     final qp = params.entries
@@ -866,7 +868,7 @@ class _SubscriptionPaymentPageState extends State<SubscriptionPaymentPage> {
     return '$_apiBase/checkout?$qp';
   }
 
-  Future<void> _openWebCheckout() async {
+  Future<void> _openWebCheckout({String? wallet}) async {
     setState(() {
       _isProcessingPayment = true;
       _errorMessage = null;
@@ -913,6 +915,7 @@ class _SubscriptionPaymentPageState extends State<SubscriptionPaymentPage> {
         firstName: firstName,
         lastName: lastName,
         email: email,
+        wallet: wallet,
         userId: uid, // ✅ send to checkout.html
       );
 
@@ -1066,6 +1069,35 @@ class _SubscriptionPaymentPageState extends State<SubscriptionPaymentPage> {
                     horizontal: 16, vertical: 8),
               ),
             ),
+            if (Platform.isIOS) ...[
+              const SizedBox(height: 12),
+              Card(
+                elevation: 2,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                child: ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.phone_iphone, color: Colors.black),
+                  ),
+                  title: const Text(
+                    'Apple Pay',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: const Text('Pay quickly with Apple Pay'),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: _isProcessingPayment
+                      ? null
+                      : () => _openWebCheckout(wallet: 'apple'),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                ),
+              ),
+            ],
             if (_errorMessage != null) ...[
               const SizedBox(height: 16),
               Container(

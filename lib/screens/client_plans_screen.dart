@@ -38,6 +38,157 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> with SingleTicker
   static const String _squareLocationId = 'L8S08PC1N6RPJ';
   bool _isProcessingPayment = false;
 
+  List<Map<String, dynamic>> _defaultPlans() {
+    return [
+      {
+        'name': '4 Sessions Monthly',
+        'category': 'Semi Private Monthly Plans',
+        'sessions': 4,
+        'price': 185.0,
+        'status': 'Active',
+        'description': '4 sessions per month for semi-private training',
+        'createdAt': FieldValue.serverTimestamp(),
+      },
+      {
+        'name': '8 Sessions Monthly',
+        'category': 'Semi Private Monthly Plans',
+        'sessions': 8,
+        'price': 375.0,
+        'status': 'Active',
+        'description': '8 sessions per month for semi-private training',
+        'createdAt': FieldValue.serverTimestamp(),
+      },
+      {
+        'name': '12 Sessions Monthly',
+        'category': 'Semi Private Monthly Plans',
+        'sessions': 12,
+        'price': 500.0,
+        'status': 'Active',
+        'description': '12 sessions per month for semi-private training',
+        'createdAt': FieldValue.serverTimestamp(),
+      },
+      {
+        'name': '16 Sessions Monthly',
+        'category': 'Semi Private Monthly Plans',
+        'sessions': 16,
+        'price': 600.0,
+        'status': 'Active',
+        'description': '16 sessions per month for semi-private training',
+        'createdAt': FieldValue.serverTimestamp(),
+      },
+      {
+        'name': '4 Sessions Bi-Weekly',
+        'category': 'Semi Private Bi Weekly Plans',
+        'sessions': 4,
+        'price': 94.0,
+        'status': 'Active',
+        'description':
+            '4 sessions per month for semi-private bi-weekly training',
+        'createdAt': FieldValue.serverTimestamp(),
+      },
+      {
+        'name': '8 Sessions Bi-Weekly',
+        'category': 'Semi Private Bi Weekly Plans',
+        'sessions': 8,
+        'price': 187.0,
+        'status': 'Active',
+        'description':
+            '8 sessions per month for semi-private bi-weekly training',
+        'createdAt': FieldValue.serverTimestamp(),
+      },
+      {
+        'name': '12 Sessions Bi-Weekly',
+        'category': 'Semi Private Bi Weekly Plans',
+        'sessions': 12,
+        'price': 260.0,
+        'status': 'Active',
+        'description':
+            '12 sessions per month for semi-private bi-weekly training',
+        'createdAt': FieldValue.serverTimestamp(),
+      },
+      {
+        'name': '16 Sessions Bi-Weekly',
+        'category': 'Semi Private Bi Weekly Plans',
+        'sessions': 16,
+        'price': 310.0,
+        'status': 'Active',
+        'description':
+            '16 sessions per month for semi-private bi-weekly training',
+        'createdAt': FieldValue.serverTimestamp(),
+      },
+      {
+        'name': 'Day Pass',
+        'category': 'Semi Private Day Pass',
+        'sessions': 1,
+        'price': 40.0,
+        'status': 'Active',
+        'description': 'Single day pass for semi-private training',
+        'createdAt': FieldValue.serverTimestamp(),
+      },
+      {
+        'name': 'Group Training',
+        'category': 'Group Training or Class',
+        'sessions': 1,
+        'price': 25.0,
+        'status': 'Active',
+        'description': 'Single session for group training or class',
+        'createdAt': FieldValue.serverTimestamp(),
+      },
+      {
+        'name': 'High School Athlete',
+        'category': 'Strength & Agility Session (High School Athlete)',
+        'sessions': 1,
+        'price': 25.0,
+        'status': 'Active',
+        'description':
+            'Strength and agility session for high school athletes',
+        'createdAt': FieldValue.serverTimestamp(),
+      },
+      {
+        'name': 'Kids Session',
+        'category': 'Strength & Agility Session (Kids)',
+        'sessions': 1,
+        'price': 25.0,
+        'status': 'Active',
+        'description': 'Strength and agility session for kids',
+        'createdAt': FieldValue.serverTimestamp(),
+      },
+      {
+        'name': 'Athletic Performance Adult',
+        'category': 'Athletic Performance (Adult)',
+        'sessions': 1,
+        'price': 25.0,
+        'status': 'Active',
+        'description': 'Athletic performance training for adults',
+        'createdAt': FieldValue.serverTimestamp(),
+      },
+    ];
+  }
+
+  Future<void> _ensureDefaultPlansExist() async {
+    final colRef = _firestore.collection('plans');
+    final existing = await colRef.get();
+
+    final existingKeys = <String>{
+      for (final doc in existing.docs)
+        '${(doc.data()['name'] ?? '').toString().trim().toLowerCase()}|${(doc.data()['category'] ?? '').toString().trim().toLowerCase()}'
+    };
+
+    final missingPlans = _defaultPlans().where((plan) {
+      final key =
+          '${(plan['name'] ?? '').toString().trim().toLowerCase()}|${(plan['category'] ?? '').toString().trim().toLowerCase()}';
+      return !existingKeys.contains(key);
+    }).toList();
+
+    if (missingPlans.isEmpty) return;
+
+    final batch = _firestore.batch();
+    for (final plan in missingPlans) {
+      batch.set(colRef.doc(), plan);
+    }
+    await batch.commit();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -112,6 +263,9 @@ class _ClientPlansScreenState extends State<ClientPlansScreen> with SingleTicker
         });
         return;
       }
+
+      await _ensureDefaultPlansExist();
+
       await Future.wait([
         _loadPurchasedPlans(),
         _loadMyActivePlans(),
