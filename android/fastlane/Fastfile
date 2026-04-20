@@ -1,0 +1,96 @@
+# android/fastlane/Fastfile
+#
+# Fastlane lanes for Android (Google Play).
+#
+# Prerequisites:
+#   1. `gem install fastlane`
+#   2. Set env vars:
+#        ANDROID_KEYSTORE_PATH   – path to your .jks / .keystore file
+#        ANDROID_KEYSTORE_ALIAS  – key alias
+#        ANDROID_STORE_PASSWORD  – keystore password
+#        ANDROID_KEY_PASSWORD    – key password
+#        GOOGLE_PLAY_JSON_KEY    – path to your Play Store service-account JSON
+#
+# Usage:
+#   cd android && bundle exec fastlane <lane>
+
+default_platform(:android)
+
+platform :android do
+
+  # ─── Internal helpers ────────────────────────────────────────────────────
+
+  desc "Run Flutter tests"
+  private_lane :run_tests do
+    sh("cd .. && flutter test --no-pub")
+  end
+
+  desc "Build a signed release AAB"
+  private_lane :build_release_aab do
+    sh(
+      "cd .. && flutter build appbundle --release " \
+      "--dart-define=ENV=production"
+    )
+  end
+
+  desc "Build a signed release APK"
+  private_lane :build_release_apk do
+    sh(
+      "cd .. && flutter build apk --release --split-per-abi " \
+      "--dart-define=ENV=production"
+    )
+  end
+
+  # ─── Public lanes ────────────────────────────────────────────────────────
+
+  desc "Run tests only (CI gate)"
+  lane :test do
+    run_tests
+  end
+
+  desc "Build release AAB without deploying (for local verification)"
+  lane :build do
+    run_tests
+    build_release_aab
+  end
+
+  desc "Deploy a new internal-test track build to Google Play"
+  lane :deploy_internal do
+    run_tests
+    build_release_aab
+    upload_to_play_store(
+      track: "internal",
+      aab: "../build/app/outputs/bundle/release/app-release.aab",
+      json_key: ENV["GOOGLE_PLAY_JSON_KEY"],
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+    )
+  end
+
+  desc "Promote the latest internal build to beta (open testing)"
+  lane :promote_to_beta do
+    upload_to_play_store(
+      track: "internal",
+      track_promote_to: "beta",
+      json_key: ENV["GOOGLE_PLAY_JSON_KEY"],
+      skip_upload_apk: true,
+      skip_upload_aab: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+    )
+  end
+
+  desc "Promote the latest beta to production"
+  lane :promote_to_production do
+    upload_to_play_store(
+      track: "beta",
+      track_promote_to: "production",
+      json_key: ENV["GOOGLE_PLAY_JSON_KEY"],
+      skip_upload_apk: true,
+      skip_upload_aab: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+    )
+  end
+
+end

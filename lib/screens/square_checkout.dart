@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'native_pay_button.dart';
 
 /// (Optional) old in-app WebView launcher, now unused if you only use external browser
 class SquareWebCheckout extends StatefulWidget {
@@ -203,7 +205,8 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
       setState(() => _isProcessingPayment = false);
 
       // Backend writes client_purchases; UI updates via streams.
-    } catch (e) {
+    } catch (e, st) {
+      FirebaseCrashlytics.instance.recordError(e, st, fatal: false);
       if (!mounted) return;
       setState(() {
         _errorMessage = 'Error starting checkout';
@@ -313,6 +316,22 @@ class _SquarePaymentPageState extends State<SquarePaymentPage> {
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               ),
+            ),
+            // ── Native Pay (Google Pay on Android / Apple Pay on iOS) ────────
+            NativePayButton(
+              amountCents: (planPrice * 100).round(),
+              planName: planName,
+              onToken: (token) async {
+                // TODO: forward the native-pay token to your Cloud Function
+                // e.g. await http.post(Uri.parse('$base/process-native-payment'),
+                //   body: jsonEncode({'token': token, 'amountCents': (planPrice * 100).round()}));
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Payment successful!')),
+                  );
+                  Navigator.of(context).pop(true);
+                }
+              },
             ),
             if (_errorMessage != null) ...[
               const SizedBox(height: 16),

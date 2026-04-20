@@ -1,0 +1,98 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ─────────────────────────────────────────────────────────────
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // ── Users ────────────────────────────────────────────────────────────────
+    // Each user can read/write only their own profile; admins can read all.
+    match /users/{uid} {
+      allow read:   if isOwner(uid) || isAdmin();
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── Slots (bookable sessions) ─────────────────────────────────────────
+    // Admins manage slots; authenticated clients can read available slots.
+    match /slots/{slotId} {
+      allow read:   if isSignedIn();
+      allow write:  if isAdmin();
+    }
+
+    // ── Bookings ─────────────────────────────────────────────────────────
+    // A client may create/read their own bookings; admins can manage all.
+    match /bookings/{bookingId} {
+      allow read:   if isSignedIn() &&
+                       (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() &&
+                       request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() &&
+                       (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // ── Client purchases ─────────────────────────────────────────────────
+    // Written server-side (Cloud Functions) only; clients and admins may read.
+    match /client_purchases/{purchaseId} {
+      allow read:   if isSignedIn() &&
+                       (resource.data.userId == request.auth.uid || isAdmin());
+      // Writes are performed exclusively by Cloud Functions (admin SDK),
+      // so no client-side write is ever needed.
+      allow write:  if false;
+    }
+
+    // ── Plans (training plans catalogue) ─────────────────────────────────
+    // Admins manage the catalogue; authenticated clients can browse.
+    match /plans/{planId} {
+      allow read:   if isSignedIn();
+      allow write:  if isAdmin();
+    }
+
+    // ── Announcements ────────────────────────────────────────────────────
+    match /announcements/{announcementId} {
+      allow read:  if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ── Workouts ─────────────────────────────────────────────────────────
+    match /workouts/{workoutId} {
+      allow read:  if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ── Workout sessions (client progress) ───────────────────────────────
+    match /workout_sessions/{sessionId} {
+      allow read:   if isSignedIn() &&
+                       (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() &&
+                       request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() &&
+                       (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // ── FCM tokens ───────────────────────────────────────────────────────
+    match /fcm_tokens/{uid} {
+      allow read:   if isOwner(uid) || isAdmin();
+      allow write:  if isOwner(uid);
+    }
+
+    // ── Default: deny everything else ───────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show FlutterError, FlutterErrorDetails;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 
 import 'auth/login_page.dart';
 import 'auth/sign_up_page.dart';
@@ -19,7 +21,10 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
 
-  // 🔔 Optional: FCM setup (you already had this)
+  // 🔥 Crashlytics: catch all Flutter framework errors
+  FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
+
+  // 🔔 FCM setup
   try {
     FirebaseMessaging messaging = FirebaseMessaging.instance;
     NotificationSettings settings = await messaging.requestPermission(
@@ -27,18 +32,19 @@ void main() async {
       badge: true,
       sound: true,
     );
-    print('User granted permission: ${settings.authorizationStatus}');
+    debugPrint('FCM permission: ${settings.authorizationStatus}');
 
     String? token = await messaging.getToken();
-    print('FCM Token: $token');
+    debugPrint('FCM Token: $token');
 
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      print('Received foreground notification: ${message.notification?.title}');
+      debugPrint('Foreground notification: ${message.notification?.title}');
     });
 
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-  } catch (e) {
-    print('FCM init error: $e');
+  } catch (e, st) {
+    FirebaseCrashlytics.instance.recordError(e, st, fatal: false);
+    debugPrint('FCM init error: $e');
   }
 
   runApp(const MyApp());
@@ -47,7 +53,7 @@ void main() async {
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
-  print('Received background notification: ${message.notification?.title}');
+  debugPrint('Background notification: ${message.notification?.title}');
 }
 
 class MyApp extends StatelessWidget {

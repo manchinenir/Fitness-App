@@ -1,0 +1,13 @@
+{
+  "provider": "apple_pay",
+  "data": {
+    "merchantIdentifier": "merchant.com.flexfacility.app",
+    "displayName": "Flex Facility",
+    "merchantCapabilities": ["supports3DS"],
+    "supportedNetworks": ["amex", "discover", "masterCard", "visa"],
+    "countryCode": "US",
+    "currencyCode": "USD",
+    "requiredBillingContactFields": [],
+    "requiredShippingContactFields": []
+  }
+}

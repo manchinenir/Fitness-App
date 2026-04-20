@@ -1,0 +1,93 @@
+# ios/fastlane/Fastfile
+#
+# Fastlane lanes for iOS (App Store Connect / TestFlight).
+#
+# Prerequisites:
+#   1. `gem install fastlane`
+#   2. Set env vars:
+#        APP_STORE_CONNECT_API_KEY_ID       – key ID from App Store Connect
+#        APP_STORE_CONNECT_API_ISSUER_ID    – issuer ID
+#        APP_STORE_CONNECT_API_KEY_CONTENT  – base64-encoded .p8 key content
+#        MATCH_GIT_URL                      – Git URL for your Fastlane Match certs repo
+#        MATCH_PASSWORD                     – encryption passphrase for the Match repo
+#
+# Usage:
+#   cd ios && bundle exec fastlane <lane>
+
+default_platform(:ios)
+
+platform :ios do
+
+  # ─── Shared setup ────────────────────────────────────────────────────────
+
+  before_all do
+    # Authenticate with App Store Connect via API key (no 2FA needed)
+    app_store_connect_api_key(
+      key_id:     ENV["APP_STORE_CONNECT_API_KEY_ID"],
+      issuer_id:  ENV["APP_STORE_CONNECT_API_ISSUER_ID"],
+      key_content: Base64.decode64(ENV["APP_STORE_CONNECT_API_KEY_CONTENT"]),
+      is_key_content_base64: true,
+    )
+  end
+
+  # ─── Internal helpers ────────────────────────────────────────────────────
+
+  desc "Run Flutter tests"
+  private_lane :run_tests do
+    sh("cd ../.. && flutter test --no-pub")
+  end
+
+  desc "Sync code-signing certificates (read-only)"
+  private_lane :sync_certs do
+    match(
+      type:         "appstore",
+      readonly:     true,
+      git_url:      ENV["MATCH_GIT_URL"],
+      app_identifier: "com.flexfacility.app",
+    )
+  end
+
+  desc "Build the iOS release IPA"
+  private_lane :build_release_ipa do
+    sync_certs
+    sh(
+      "cd ../.. && flutter build ipa --release --export-method app-store " \
+      "--dart-define=ENV=production"
+    )
+  end
+
+  # ─── Public lanes ────────────────────────────────────────────────────────
+
+  desc "Run tests only (CI gate)"
+  lane :test do
+    run_tests
+  end
+
+  desc "Build release IPA without uploading (for local verification)"
+  lane :build do
+    run_tests
+    build_release_ipa
+  end
+
+  desc "Upload a new build to TestFlight"
+  lane :deploy_testflight do
+    run_tests
+    build_release_ipa
+    upload_to_testflight(
+      ipa:         "../../build/ios/ipa/flex_facility_app.ipa",
+      skip_waiting_for_build_processing: true,
+    )
+  end
+
+  desc "Submit the latest TestFlight build for App Store review"
+  lane :submit_for_review do
+    deliver(
+      submit_for_review: true,
+      automatic_release: false,
+      force:             true,
+      skip_metadata:     false,
+      skip_screenshots:  true,
+    )
+  end
+
+end

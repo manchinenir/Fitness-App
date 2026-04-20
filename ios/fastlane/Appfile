@@ -1,0 +1,8 @@
+# ios/fastlane/Appfile
+#
+# Replace the bundle identifier and Apple ID with your actual values.
+
+app_identifier("com.flexfacility.app")
+apple_id(ENV["APPLE_ID"] || "")
+itc_team_id(ENV["ITC_TEAM_ID"] || "")
+team_id(ENV["DEV_PORTAL_TEAM_ID"] || "")

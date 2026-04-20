@@ -52,24 +52,40 @@ dependencies:
   # Local storage
   shared_preferences: ^2.2.2
 
+  # Charts & Indicators (runtime UI — moved from dev_dependencies)
+  fl_chart: ^0.63.0
+  percent_indicator: ^4.2.2
+
+  # WebView (runtime — moved from dev_dependencies)
+  webview_flutter: ^4.13.0
+  webview_flutter_android: ^4.10.5
+  webview_flutter_wkwebview: ^3.23.1
+
+  # Square in-app payments (runtime — moved from dev_dependencies)
+  square_in_app_payments: ^1.6.0
+
+  # Clipboard (runtime — moved from dev_dependencies)
+  clipboard: ^0.1.3
+
+  # Crashlytics
+  firebase_crashlytics: ^4.3.2
+
+  # Native payments (Google Pay / Apple Pay)
+  pay: ^2.0.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^2.0.0
   flutter_launcher_icons: ^0.13.1
   flutter_native_splash: ^2.3.5
-  fl_chart: ^0.63.0
-  percent_indicator: ^4.2.2
-  square_in_app_payments: ^1.6.0
-  webview_flutter: ^4.13.0
-  webview_flutter_android: ^4.10.5
-  webview_flutter_wkwebview: ^3.23.1
-  clipboard: ^0.1.3
 
 flutter:
   uses-material-design: true
   assets:
     - assets/images/flex_login/logo.png
+    - assets/pay/google_pay_config.json
+    - assets/pay/apple_pay_config.json
 
 flutter_native_splash:
   color: "#1C2D5E"
