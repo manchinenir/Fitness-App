@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+	<dict>
+		<key>CADisableMinimumFrameDurationOnPhone</key>
+		<true/>
+		<key>CFBundleDevelopmentRegion</key>
+		<string>$(DEVELOPMENT_LANGUAGE)</string>
+		<key>CFBundleDisplayName</key>
+		<string>Flex Facility App</string>
+		<key>CFBundleExecutable</key>
+		<string>$(EXECUTABLE_NAME)</string>
+		<key>CFBundleIdentifier</key>
+		<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+		<key>CFBundleInfoDictionaryVersion</key>
+		<string>6.0</string>
+		<key>CFBundleName</key>
+		<string>flex_facility_app</string>
+		<key>CFBundlePackageType</key>
+		<string>APPL</string>
+		<key>CFBundleShortVersionString</key>
+		<string>$(FLUTTER_BUILD_NAME)</string>
+		<key>CFBundleSignature</key>
+		<string>????</string>
+		<key>CFBundleVersion</key>
+		<string>$(FLUTTER_BUILD_NUMBER)</string>
+		<key>LSRequiresIPhoneOS</key>
+		<true/>
+		<key>UIApplicationSupportsIndirectInputEvents</key>
+		<true/>
+		<key>UILaunchStoryboardName</key>
+		<string>LaunchScreen</string>
+		<key>UIMainStoryboardFile</key>
+		<string>Main</string>
+		<key>UISupportedInterfaceOrientations</key>
+		<array>
+			<string>UIInterfaceOrientationPortrait</string>
+			<string>UIInterfaceOrientationLandscapeLeft</string>
+			<string>UIInterfaceOrientationLandscapeRight</string>
+		</array>
+		<key>UISupportedInterfaceOrientations~ipad</key>
+		<array>
+			<string>UIInterfaceOrientationPortrait</string>
+			<string>UIInterfaceOrientationPortraitUpsideDown</string>
+			<string>UIInterfaceOrientationLandscapeLeft</string>
+			<string>UIInterfaceOrientationLandscapeRight</string>
+		</array>
+		<key>LSApplicationQueriesSchemes</key>
+		<array>
+			<string>whatsapp</string>
+			<string>mailto</string>
+			<string>sms</string>
+		</array>
+
+    <key>LSApplicationQueriesSchemes</key>
+<array>
+    <string>itms-apps</string>
+    <string>itms</string>
+    <string>appstore</string>
+</array>
+		<!-- ✅ REQUIRED FOR IMAGE + VIDEO PICKING -->
+		<key>NSPhotoLibraryUsageDescription</key>
+		<string>Flex Facility needs access to your photo library to select images and videos.</string>
+		<!-- ✅ OPTIONAL BUT RECOMMENDED (saving media) -->
+		<key>NSPhotoLibraryAddUsageDescription</key>
+		<string>Flex Facility needs permission to save photos and videos to your library.</string>
+		<!-- ✅ REQUIRED IF YOU USE CAMERA -->
+		<key>NSCameraUsageDescription</key>
+		<string>Flex Facility needs camera access to take photos and record videos.</string>
+		<!-- ✅ REQUIRED IF YOU RECORD VIDEO WITH SOUND -->
+		<key>NSMicrophoneUsageDescription</key>
+		<string>Flex Facility needs microphone access while recording videos.</string>
+		<!-- ✅ REQUIRED FOR FACE ID / TOUCH ID -->
+		<key>NSFaceIDUsageDescription</key>
+		<string>Flex Facility uses Face ID to securely log you in without entering your password</string>
+		<key>NSApplePayUsageDescription</key>
+		<string>Flex Facility uses Apple Pay to securely process payments.</string>
+		<key>UIStatusBarHidden</key>
+		<true/>
+		<key>UIViewControllerBasedStatusBarAppearance</key>
+		<false/>
+	</dict>
+</plist>

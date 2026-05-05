@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Flex Facility Checkout</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- Square Web Payments SDK – production -->
+    <script src="https://web.squarecdn.com/v1/square.js"></script>
+
+    <style>
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        background: #f3f4f6;
+        margin: 0;
+        padding: 0;
+      }
+      .page {
+        max-width: 420px;
+        margin: 40px auto;
+        background: #ffffff;
+        border-radius: 16px;
+        box-shadow: 0 10px 25px rgba(15, 23, 42, 0.12);
+        padding: 24px 20px 28px;
+      }
+      .title {
+        font-size: 20px;
+        font-weight: 700;
+        color: #111827;
+        margin-bottom: 4px;
+      }
+      .subtitle {
+        font-size: 13px;
+        color: #6b7280;
+        margin-bottom: 16px;
+      }
+      .amount {
+        font-size: 24px;
+        font-weight: 700;
+        color: #16a34a;
+        margin-bottom: 20px;
+      }
+      .label {
+        font-size: 13px;
+        color: #6b7280;
+        margin-bottom: 4px;
+      }
+      #card-section {
+        margin-top: 16px;
+      }
+      #card-container {
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 10px 12px;
+        margin-bottom: 12px;
+      }
+      button.primary {
+        width: 100%;
+        padding: 12px 16px;
+        border-radius: 999px;
+        border: none;
+        background: #2563eb;
+        color: white;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.primary:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+      /* Apple Pay button style */
+      button.apple-pay {
+        width: 100%;
+        padding: 12px 16px;
+        border-radius: 999px;
+        border: none;
+        background: #000;
+        color: white;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      .status {
+        margin-top: 14px;
+        font-size: 13px;
+        color: #6b7280;
+      }
+      .status.error {
+        color: #b91c1c;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="title" id="plan-title">Flex Facility Plan</div>
+      <div class="subtitle" id="plan-subtitle">
+        Secure checkout powered by Square
+      </div>
+      <div class="amount" id="amount-text">$0.00</div>
+
+      <!-- APPLE PAY (if available) -->
+      <div id="apple-section" style="display:none;">
+        <div class="label">Pay with Apple Pay</div>
+        <div id="apple-pay-container"></div>
+      </div>
+
+      <!-- CARD SECTION ONLY -->
+      <div id="card-section">
+        <div class="label">Pay with card</div>
+        <div id="card-container"></div>
+        <button id="card-pay-button" class="primary">
+          Pay with card
+        </button>
+      </div>
+
+      <div id="status" class="status"></div>
+    </div>
+
+    <script>
+      (async function () {
+        const params = new URLSearchParams(window.location.search);
+
+        const appId = params.get("appId");
+        const locationId = params.get("locationId");
+        const env = params.get("env") || "production";
+        const apiUrl =
+          params.get("apiUrl") ||
+          // fallback: same origin /process-payment if not provided
+          window.location.origin + "/api/process-payment";
+
+        const planName = params.get("planName") || "Fitness Plan";
+        const amountCents = parseInt(params.get("amountCents") || "0", 10);
+
+        const userId = params.get("userId") || "";
+        const planId = params.get("planId") || "";
+        const sessions = parseInt(params.get("sessions") || "0", 10);
+        const priceDollarsParam = params.get("priceDollars");
+        const priceDollars = priceDollarsParam
+          ? parseFloat(priceDollarsParam)
+          : amountCents / 100.0;
+        const planCategory = params.get("planCategory") || "";
+        const planDescription = params.get("planDescription") || "";
+        const email = params.get("email") || "";
+        const firstName = params.get("firstName") || "";
+        const lastName = params.get("lastName") || "";
+        const ref = params.get("ref") || "";
+
+        const amountStr = (amountCents / 100).toFixed(2);
+
+        const planTitleEl = document.getElementById("plan-title");
+        const amountTextEl = document.getElementById("amount-text");
+        const statusEl = document.getElementById("status");
+        const cardSection = document.getElementById("card-section");
+        const appleSection = document.getElementById("apple-section");
+        const appleContainer = document.getElementById("apple-pay-container");
+
+        planTitleEl.textContent = planName;
+        amountTextEl.textContent = "$" + amountStr;
+
+        function setStatus(msg, isError) {
+          statusEl.textContent = msg || "";
+          statusEl.classList.toggle("error", !!isError);
+        }
+
+        if (!window.Square) {
+          setStatus("Square.js failed to load.", true);
+          return;
+        }
+        if (!appId || !locationId || !apiUrl) {
+          setStatus("Missing checkout configuration.", true);
+          return;
+        }
+
+        const payments = window.Square.payments(appId, locationId);
+        let card;
+
+        async function createCard() {
+          card = await payments.card();
+          await card.attach("#card-container");
+          cardSection.style.display = "block";
+        }
+
+        async function sendPayment(token) {
+          setStatus("Processing payment…");
+          const payButton = document.getElementById("card-pay-button");
+          const appleBtn = document.getElementById("apple-pay-button");
+          if (payButton) payButton.disabled = true;
+          if (appleBtn) appleBtn.disabled = true;
+
+          const body = {
+            token: { id: token },
+            amountCents,
+            currency: "USD",
+            locationId,
+            planName,
+            buyer: {
+              userId,
+              planId,
+              sessions,
+              price: priceDollars,
+              planCategory,
+              description: planDescription,
+              email,
+              firstName,
+              lastName,
+            },
+            billingDetails: {},
+            referenceId: ref || undefined,
+          };
+
+          try {
+            const res = await fetch(apiUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "x-square-env": env,
+              },
+              body: JSON.stringify(body),
+            });
+
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+              const msg =
+                data && data.error
+                  ? data.error
+                  : "Payment failed. Please try another card.";
+              setStatus(msg, true);
+              if (payButton) payButton.disabled = false;
+              if (appleBtn) appleBtn.disabled = false;
+              return;
+            }
+
+            setStatus("Payment successful! You can close this page.", false);
+          } catch (e) {
+            console.error("process-payment error:", e);
+            setStatus(
+              "Network error while processing payment. Please try again.",
+              true
+            );
+            if (payButton) payButton.disabled = false;
+            if (appleBtn) appleBtn.disabled = false;
+          }
+        }
+
+        // Card pay button handler
+        document
+          .getElementById("card-pay-button")
+          .addEventListener("click", async (e) => {
+            e.preventDefault();
+            if (!card) return;
+            setStatus("Processing card…");
+            const result = await card.tokenize();
+            if (result.status !== "OK") {
+              setStatus("Card was declined or cancelled.", true);
+              return;
+            }
+            await sendPayment(result.token);
+          });
+
+        // Apple Pay integration
+        try {
+          const applePay = await payments.applePay();
+          const canUseApplePay = await applePay.canMakePayment();
+          console.log("Square applePay object:", !!applePay);
+          console.log("applePay.canMakePayment():", canUseApplePay);
+
+          // Extra platform check for iPad/Safari if SDK returns false:
+          const hasApplePaySession = !!window.ApplePaySession;
+          let canMakePaymentsViaAPIS = false;
+          try {
+            if (hasApplePaySession && typeof ApplePaySession.canMakePayments === "function") {
+              canMakePaymentsViaAPIS = await ApplePaySession.canMakePayments();
+              console.log("ApplePaySession.canMakePayments():", canMakePaymentsViaAPIS);
+            }
+          } catch (apErr) {
+            console.warn("ApplePaySession.canMakePayments() error:", apErr);
+          }
+
+          // Final decision: SDK says yes OR platform API says yes
+          // Detect iPad (important fix)
+          const isIpad =
+            /iPad/.test(navigator.userAgent) ||
+            (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+          // Apple Pay available ONLY on iPhone
+          const appleAvailable =
+            (canUseApplePay || canMakePaymentsViaAPIS) && !isIpad;
+
+          if (!appleAvailable) {
+            // Hide Apple Pay UI on unsupported devices (important for iPad)
+            appleSection.style.display = "none";  // 🔥 REQUIRED
+            setStatus("Apple Pay not available. Use card payment.", false);
+          } else {
+            appleSection.style.display = "block";
+
+            // Create a simple Apple Pay-style button
+            const btn = document.createElement("button");
+            btn.id = "apple-pay-button";
+            btn.className = "apple-pay";
+            btn.type = "button";
+            btn.innerHTML = "Pay with Apple Pay";
+            appleContainer.appendChild(btn);
+
+            btn.addEventListener("click", async () => {
+              setStatus("Initializing Apple Pay…");
+              btn.disabled = true;
+              try {
+                const paymentRequest = {
+                  countryCode: "US",
+                  currencyCode: "USD",
+                  total: {
+                    label: planName,
+                    amount: amountStr,
+                  },
+                };
+
+                console.log("Calling applePay.tokenize()");
+                const result = await applePay.tokenize(paymentRequest);
+                console.log("applePay.tokenize result:", result);
+
+                if (!result || result.status !== "OK") {
+                  setStatus("Apple Pay authorization failed or was cancelled.", true);
+                  btn.disabled = false;
+                  return;
+                }
+
+                await sendPayment(result.token);
+              } catch (err) {
+                console.error("Apple Pay error:", err);
+                setStatus("Apple Pay error. Please try again.", true);
+                btn.disabled = false;
+              }
+            });
+          }
+        } catch (e) {
+          console.info("Apple Pay initialization failed:", e);
+          setStatus("Apple Pay not available. Use card payment.", false);
+         }
+
+        await createCard();
+      })();
+    </script>
+  </body>
+</html>
