@@ -75,6 +75,21 @@ function sendTransactionalEmail({ to, subject, text, html, fromName }) {
   });
 }
 
+// For verification & password reset — no List-Unsubscribe so iCloud/Yahoo don't drop it
+function sendCriticalEmail({ to, subject, text, html, fromName }) {
+  const resend = getResend();
+  const fromStr = `${fromName || MAIL_FROM.name} <${MAIL_FROM.email}>`;
+
+  return resend.emails.send({
+    from: fromStr,
+    to: Array.isArray(to) ? to : [to],
+    reply_to: REPLY_TO.email,
+    subject,
+    ...(text ? { text } : {}),
+    ...(html ? { html } : {}),
+  });
+}
+
 /* =========================
    Helpers
 ========================= */
@@ -251,6 +266,82 @@ function buildPaymentSuccessHtml({ firstName, lastName, planName, amount, refere
             </tr>
           </table>
 
+          <p style="margin-top:16px;font-size:11px;color:#9ca3af;text-align:center;">
+            (c) ${new Date().getFullYear()} Flex Facility  All rights reserved
+          </p>
+        </td>
+      </tr>
+    </table>
+  </div>
+  `;
+}
+
+/** Trainer payment notification HTML */
+function buildTrainerPaymentHtml({ clientName, clientEmail, planName, amount, referenceId }) {
+  const logoImgSrc = getLogoImgSrc();
+  return `
+  <div style="background:${BRAND_COLORS.lightBg};padding:24px 0;font-family:Arial,Helvetica,sans-serif;color:#111827;">
+    <table align="center" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;">
+      <tr>
+        <td style="padding:24px;">
+          <table width="100%" cellpadding="0" cellspacing="0" style="background:${BRAND_COLORS.cardBg};border-radius:16px;box-shadow:0 4px 16px rgba(15,23,42,0.08);overflow:hidden;">
+            <tr>
+              <td style="padding:20px 24px 12px 24px;border-bottom:1px solid #e5e7eb;">
+                <img src="${logoImgSrc}" alt="Flex Facility" width="100" style="display:block;margin-bottom:16px;border-radius:50%;object-fit:cover;" />
+                <div style="font-size:18px;font-weight:600;color:${BRAND_COLORS.green};">
+                  New Payment Received
+                </div>
+                <p style="margin:10px 0 0 0;font-size:14px;color:#4b5563;line-height:1.6;">
+                  Hi Kenny,<br/>A client has just completed a payment on Flex Facility.
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:16px 24px 8px 24px;">
+                <p style="margin:0 0 8px 0;font-size:13px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.08em;">
+                  Client details
+                </p>
+                <table cellpadding="0" cellspacing="0" width="100%" style="font-size:14px;color:#111827;">
+                  <tr>
+                    <td style="padding:4px 0;width:120px;color:#6b7280;">Name</td>
+                    <td style="padding:4px 0;font-weight:600;">${clientName}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:4px 0;width:120px;color:#6b7280;">Email</td>
+                    <td style="padding:4px 0;">${clientEmail}</td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:8px 24px 8px 24px;border-top:1px solid #f3f4f6;">
+                <p style="margin:0 0 8px 0;font-size:13px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.08em;">
+                  Payment details
+                </p>
+                <table cellpadding="0" cellspacing="0" width="100%" style="font-size:14px;color:#111827;">
+                  <tr>
+                    <td style="padding:4px 0;width:120px;color:#6b7280;">Plan</td>
+                    <td style="padding:4px 0;">${planName}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:4px 0;width:120px;color:#6b7280;">Amount paid</td>
+                    <td style="padding:4px 0;font-weight:600;color:${BRAND_COLORS.green};">$${amount}</td>
+                  </tr>
+                  ${referenceId ? `<tr>
+                    <td style="padding:4px 0;width:120px;color:#6b7280;">Reference</td>
+                    <td style="padding:4px 0;">${referenceId}</td>
+                  </tr>` : ""}
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:16px 24px 20px 24px;border-top:1px solid #e5e7eb;">
+                <p style="margin:0;font-size:12px;color:#9ca3af;">
+                  You can view this client in the Flex Facility admin dashboard.
+                </p>
+              </td>
+            </tr>
+          </table>
           <p style="margin-top:16px;font-size:11px;color:#9ca3af;text-align:center;">
             (c) ${new Date().getFullYear()} Flex Facility  All rights reserved
           </p>
@@ -943,6 +1034,7 @@ Client: ${clientInfo}
 const ALLOWED_ORIGINS = [
   "https://flex-facility-app-b55aa.web.app",
   "https://flex-facility-app-b55aa.firebaseapp.com",
+  "https://us-central1-flex-facility-app-b55aa.cloudfunctions.net",
 ];
 
 const app = express();
@@ -1036,7 +1128,7 @@ app.post("/auth/send-verification-email", authLimiter, async (req, res) => {
             </div>
         `;
 
-    await sendTransactionalEmail({
+    await sendCriticalEmail({
             to: email,
             fromName: "Flex Facility",
             subject: "Verify your Flex Facility email address",
@@ -1087,7 +1179,7 @@ app.post("/auth/send-password-reset-email", authLimiter, async (req, res) => {
       </div>
     `;
 
-    await sendTransactionalEmail({
+    await sendCriticalEmail({
       to: email,
       fromName: "Flex Facility",
       subject: "Reset your Flex Facility password",
@@ -1276,6 +1368,28 @@ app.post("/process-payment", paymentLimiter, async (req, res) => {
       } catch (e) {
         console.error("SendGrid error:", e?.response?.data || e.message);
       }
+    }
+
+    // Notify trainer of new payment
+    try {
+      const trainerEmail = (functions.config()?.trainer?.email || "Kenny@flextraining.co").trim();
+      const dollars = (Number(amountCents) / 100).toFixed(2);
+      const clientFullName = `${buyer.firstName || ""} ${buyer.lastName || ""}`.trim() || buyer.email || "Unknown";
+      await sendTransactionalEmail({
+        to: trainerEmail,
+        fromName: "Flex Facility Billing",
+        subject: `[PAYMENT RECEIVED] ${clientFullName} - ${planName}`,
+        text: `Hi Kenny,\n\nA new payment has been received.\n\nClient: ${clientFullName}\nEmail: ${buyer.email || "no email"}\nPlan: ${planName}\nAmount: $${dollars}\n${refId ? `Reference: ${refId}\n` : ""}\n- Flex Facility`,
+        html: buildTrainerPaymentHtml({
+          clientName: clientFullName,
+          clientEmail: buyer.email || "no email",
+          planName,
+          amount: dollars,
+          referenceId: refId,
+        }),
+      });
+    } catch (e) {
+      console.error("Trainer payment notify error:", e?.response?.data || e.message);
     }
 
     // Write client_purchases so the app shows the plan as ACTIVE
@@ -1903,4 +2017,67 @@ exports.sendSessionReminders = functions
     }
 
     return null;
+  });
+
+/* =========================
+   AI Fitness Coach (Callable)
+   Set key: firebase functions:config:set anthropic.key="sk-ant-..."
+========================= */
+exports.aiChat = functions
+  .runWith({ memory: "512MB", timeoutSeconds: 90 })
+  .https.onCall(async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "Login required.");
+    }
+
+    const messages = data && data.messages;
+    if (!Array.isArray(messages) || messages.length === 0) {
+      throw new functions.https.HttpsError("invalid-argument", "messages array is required.");
+    }
+
+    const apiKey = (functions.config()?.anthropic?.key || "").trim();
+    if (!apiKey) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Anthropic API key not configured. Run:\n  firebase functions:config:set anthropic.key=\"sk-ant-...\""
+      );
+    }
+
+    const systemPrompt =
+      "You are an expert personal fitness coach AI assistant for Flex Facility gym. " +
+      "Help clients with workout programming, exercise technique, nutrition guidance, recovery strategies, and goal setting. " +
+      "Keep responses concise, motivating, and practical. Prioritize safety — always recommend consulting a doctor for medical concerns. " +
+      "Use an encouraging, coach-like tone.";
+
+    // Limit history to last 20 messages and cap content length to avoid excessive tokens
+    const trimmed = messages.slice(-20).map((m) => ({
+      role: String(m.role) === "user" ? "user" : "assistant",
+      content: String(m.content).slice(0, 4000),
+    }));
+
+    const response = await axios.post(
+      "https://api.anthropic.com/v1/messages",
+      {
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages: trimmed,
+      },
+      {
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        timeout: 80000,
+      }
+    );
+
+    const reply =
+      (response.data &&
+        response.data.content &&
+        response.data.content[0] &&
+        response.data.content[0].text) ||
+      "";
+    return { reply };
   });

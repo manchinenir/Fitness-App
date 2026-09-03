@@ -359,7 +359,7 @@ class _PlansScreenState extends State<PlansScreen> with SingleTickerProviderStat
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               DropdownButtonFormField<String>(
-                                initialValue: _selectedCategory,
+                                value: _selectedCategory,
                                 isExpanded: true,
                                 decoration: const InputDecoration(
                                   labelText: 'Category *',
@@ -448,7 +448,7 @@ class _PlansScreenState extends State<PlansScreen> with SingleTickerProviderStat
                           ),
                           const SizedBox(height: 16),
                           DropdownButtonFormField<String>(
-                            initialValue: _selectedStatus,
+                            value: _selectedStatus,
                             isExpanded: true,
                             decoration: const InputDecoration(
                               labelText: 'Status *',

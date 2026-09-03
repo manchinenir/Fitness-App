@@ -13,9 +13,11 @@ import 'Admin_Plan_Screen.dart';
 import 'admin_create_slots.dart';
 import 'client_list_screen.dart';
 import 'post_announcement.dart';
-import 'RevenueReport_screen.dart';
+import 'RevenueReport_Screen.dart';
 import 'settings.dart';
 import 'active_members_screen.dart'; // ⬅️ tap the pie to open this page
+import 'admin_sessions_tracker.dart';
+import 'admin_messages_screen.dart';
 
 class AdminDashboard extends StatefulWidget {
   final String userName;
@@ -627,6 +629,20 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       'Plans',
                       const PlansScreen(),
                       gradientColors: const [Color(0xFF00B09B), Color(0xFF96C93D)],
+                    ),
+                    _buildNavTile(
+                      context,
+                      Icons.track_changes_rounded,
+                      'Session\nTracker',
+                      const AdminSessionsTrackerScreen(),
+                      gradientColors: const [Color(0xFFE74C3C), Color(0xFFF97316)],
+                    ),
+                    _buildNavTile(
+                      context,
+                      Icons.chat_rounded,
+                      'Messages',
+                      const AdminMessagesScreen(),
+                      gradientColors: const [Color(0xFF1565C0), Color(0xFF2196F3)],
                     ),
                   ],
                 ),

@@ -11,5 +11,11 @@
   <array>
     <string>merchant.com.flexfacility.app</string>
   </array>
+
+  <!-- HealthKit -->
+  <key>com.apple.developer.healthkit</key>
+  <true/>
+  <key>com.apple.developer.healthkit.background-delivery</key>
+  <false/>
 </dict>
 </plist>

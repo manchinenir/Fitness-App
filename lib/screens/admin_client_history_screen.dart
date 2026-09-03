@@ -54,7 +54,7 @@ class _AdminClientHistoryScreenState extends State<AdminClientHistoryScreen> {
 
           final clients = snapshot.data!.docs;
           return DropdownButtonFormField<String>(
-            initialValue: selectedClientId,
+            value: selectedClientId,
             decoration: const InputDecoration(
               labelText: "Select Client",
               border: OutlineInputBorder(),

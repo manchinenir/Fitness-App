@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'theme/app_theme.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -110,7 +111,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Flex Facility App',
-      theme: ThemeData(primarySwatch: Colors.indigo),
+      theme: AppTheme.light,
       home: const SplashScreen(), // or const RootPage() if you want auto-login
       routes: {
         '/login': (context) => const LoginPage(),

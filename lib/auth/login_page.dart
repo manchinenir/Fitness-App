@@ -62,7 +62,7 @@ class _LoginPageState extends State<LoginPage> {
   bool _obscurePassword = true;
 
   final RegExp _emailRegex = RegExp(
-    r'^[a-zA-Z0-9.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$',
+    r'^[a-zA-Z0-9._+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$',
   );
 
   final List<String> _disposableDomains = [
@@ -407,318 +407,300 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  final Color navyBlue = const Color(0xFF1C2D5E);
-
   @override
   Widget build(BuildContext context) {
-
-
-      Future<void> _authenticateWithBiometrics() async {
-        setState(() { errorMessage = ''; });
-        try {
-          final didAuthenticate = await auth.authenticate(
-            localizedReason: 'Authenticate with Face ID / Touch ID / biometrics',
-            options: const AuthenticationOptions(
-              biometricOnly: true,
-              stickyAuth: true,
-            ),
-          );
-          if (didAuthenticate) {
-            // Retrieve credentials and auto-login
-            final email = await secureStorage.read(key: 'email') ?? '';
-            final password = await secureStorage.read(key: 'password') ?? '';
-            if (email.isNotEmpty && password.isNotEmpty) {
-              emailController.text = email;
-              passwordController.text = password;
-              await _handleAuthentication();
-            } else {
-              setState(() { errorMessage = 'No credentials found. Please login once with email and password.'; });
-            }
+    Future<void> authenticateWithBiometrics() async {
+      setState(() { errorMessage = ''; });
+      try {
+        final didAuthenticate = await auth.authenticate(
+          localizedReason: 'Authenticate with Face ID / Touch ID / biometrics',
+          options: const AuthenticationOptions(biometricOnly: true, stickyAuth: true),
+        );
+        if (didAuthenticate) {
+          final email    = await secureStorage.read(key: 'email')    ?? '';
+          final password = await secureStorage.read(key: 'password') ?? '';
+          if (email.isNotEmpty && password.isNotEmpty) {
+            emailController.text    = email;
+            passwordController.text = password;
+            await _handleAuthentication();
           } else {
-            setState(() { errorMessage = 'Biometric authentication failed.'; });
+            setState(() { errorMessage = 'No credentials found. Please login once with email and password.'; });
           }
-        } on PlatformException catch (e) {
-          setState(() { errorMessage = e.message ?? 'Biometric error'; });
+        } else {
+          setState(() { errorMessage = 'Biometric authentication failed.'; });
         }
+      } on PlatformException catch (e) {
+        setState(() { errorMessage = e.message ?? 'Biometric error'; });
       }
+    }
+
+    const bg     = Color(0xFFF5F5F5);
+    const card   = Colors.white;
+    const teal   = Color(0xFF4ECDC4);
+    const text   = Color(0xFF1A1A2E);
+    const sub    = Color(0xFF9CA3AF);
+    final shadow = [
+      BoxShadow(color: Colors.black.withValues(alpha: 0.07),
+          blurRadius: 20, offset: const Offset(0, 6)),
+    ];
+
+    Widget flatField({
+      required TextEditingController ctrl,
+      required String label,
+      required IconData icon,
+      bool obscure = false,
+      Widget? suffix,
+      TextInputType? keyboardType,
+      String? Function(String?)? validator,
+    }) {
+      return Container(
+        decoration: BoxDecoration(
+          color: card,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: shadow,
+        ),
+        child: TextFormField(
+          controller: ctrl,
+          obscureText: obscure,
+          keyboardType: keyboardType,
+          validator: validator,
+          style: const TextStyle(color: text, fontSize: 15, fontWeight: FontWeight.w600),
+          decoration: InputDecoration(
+            labelText: label,
+            labelStyle: const TextStyle(color: sub, fontSize: 14),
+            prefixIcon: Icon(icon, size: 20, color: sub),
+            suffixIcon: suffix,
+            border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: const BorderSide(color: teal, width: 2),
+            ),
+            errorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: const BorderSide(color: Color(0xFFEF4444)),
+            ),
+            focusedErrorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: const BorderSide(color: Color(0xFFEF4444), width: 2),
+            ),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
-      backgroundColor: Colors.white,
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Column(
+      backgroundColor: bg,
+      body: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => FocusScope.of(context).unfocus(),
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    width: 150,
-                    height: 150,
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.black,
-                      image: DecorationImage(
-                        image: AssetImage('assets/images/flex_login/logo.png'),
-                        fit: BoxFit.cover,
+                  const SizedBox(height: 16),
+                  // Logo
+                  Center(
+                    child: Container(
+                      width: 100, height: 100,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: card,
+                        boxShadow: shadow,
+                        image: const DecorationImage(
+                          image: AssetImage('assets/images/flex_login/logo.png'),
+                          fit: BoxFit.cover,
+                        ),
                       ),
                     ),
+                  ),
+                  const SizedBox(height: 18),
+                  const Center(
+                    child: Text('FLEX FACILITY',
+                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800,
+                            color: text, letterSpacing: 3)),
+                  ),
+                  const SizedBox(height: 4),
+                  const Center(
+                    child: Text('Premium Fitness Management',
+                        style: TextStyle(fontSize: 12, color: sub, letterSpacing: 0.5)),
+                  ),
+                  const SizedBox(height: 44),
+                  const Text('Sign in',
+                      style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800,
+                          color: text, letterSpacing: -0.5)),
+                  const SizedBox(height: 4),
+                  const Text('Welcome back to your workspace.',
+                      style: TextStyle(fontSize: 13, color: sub)),
+                  const SizedBox(height: 28),
+                  // Email
+                  flatField(
+                    ctrl: emailController,
+                    label: 'Email address',
+                    icon: Icons.email_outlined,
+                    keyboardType: TextInputType.emailAddress,
+                    validator: (value) {
+                      if (value == null || value.isEmpty) return 'Please enter an email';
+                      final domain = value.split('@').last.toLowerCase();
+                      if (!_emailRegex.hasMatch(value)) return 'Invalid email format';
+                      if (_disposableDomains.contains(domain)) return 'Disposable emails not allowed';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 14),
+                  // Password
+                  flatField(
+                    ctrl: passwordController,
+                    label: 'Password',
+                    icon: Icons.lock_outline,
+                    obscure: _obscurePassword,
+                    suffix: IconButton(
+                      icon: Icon(
+                        _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                        size: 20, color: sub,
+                      ),
+                      onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) return 'Enter your password';
+                      if (value.length < 6) return 'Password too short';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      GestureDetector(
+                        onTap: isSendingVerificationEmail ? null : _resendVerificationEmail,
+                        child: isSendingVerificationEmail
+                            ? const SizedBox(width: 16, height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: teal))
+                            : const Text('Resend verification',
+                                style: TextStyle(fontSize: 12, color: teal, fontWeight: FontWeight.w600)),
+                      ),
+                      GestureDetector(
+                        onTap: isSendingResetEmail ? null : _resetPassword,
+                        child: isSendingResetEmail
+                            ? const SizedBox(width: 16, height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: teal))
+                            : const Text('Forgot password?',
+                                style: TextStyle(fontSize: 12, color: teal, fontWeight: FontWeight.w600)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 28),
+                  // Sign in button
+                  GestureDetector(
+                    onTap: isLoading ? null : _handleAuthentication,
+                    child: Container(
+                      width: double.infinity, height: 56,
+                      decoration: BoxDecoration(
+                        color: teal,
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(color: teal.withValues(alpha: 0.35),
+                              offset: const Offset(0, 8), blurRadius: 20),
+                        ],
+                      ),
+                      child: Center(
+                        child: isLoading
+                            ? const SizedBox(width: 22, height: 22,
+                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                            : const Text('Sign in',
+                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700,
+                                    color: Colors.white, letterSpacing: 0.3)),
+                      ),
+                    ),
+                  ),
+                  // Biometrics
+                  if (_canCheckBiometrics && _hasBiometrics) ...[
+                    const SizedBox(height: 12),
+                    GestureDetector(
+                      onTap: isLoading ? null : authenticateWithBiometrics,
+                      child: Container(
+                        width: double.infinity, height: 52,
+                        decoration: BoxDecoration(
+                          color: card,
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: shadow,
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.fingerprint, size: 22, color: teal),
+                            SizedBox(width: 8),
+                            Text('Use Face ID / Touch ID',
+                                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: teal)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                  // Error banner
+                  if (errorMessage.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: card,
+                        borderRadius: BorderRadius.circular(14),
+                        boxShadow: shadow,
+                        border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.error_outline, color: Color(0xFFEF4444), size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text(errorMessage,
+                              style: const TextStyle(fontSize: 13, color: Color(0xFFB91C1C)))),
+                        ],
+                      ),
+                    ),
+                  ],
+                  // Success banner
+                  if (successMessage.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: card,
+                        borderRadius: BorderRadius.circular(14),
+                        boxShadow: shadow,
+                        border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.check_circle_outline, color: Color(0xFF10B981), size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text(successMessage,
+                              style: const TextStyle(fontSize: 13, color: Color(0xFF065F46)))),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 36),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text("Don't have an account? ",
+                          style: TextStyle(color: sub, fontSize: 14)),
+                      GestureDetector(
+                        onTap: () => Navigator.pushNamed(context, '/signup'),
+                        child: const Text('Sign Up',
+                            style: TextStyle(color: teal, fontWeight: FontWeight.w700, fontSize: 14)),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 16),
-                  Text(
-                    'Log in to your account',
-                    style: TextStyle(fontSize: 16, color: Colors.grey[700]),
-                  ),
                 ],
               ),
-              const SizedBox(height: 40),
-              Form(
-                key: _formKey,
-                child: Column(
-                  children: [
-                    TextFormField(
-                      controller: emailController,
-                      decoration: InputDecoration(
-                        labelText: 'Email',
-                        labelStyle: TextStyle(color: Colors.grey[700]),
-                        prefixIcon: Icon(Icons.email_outlined, color: navyBlue),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(color: navyBlue, width: 2),
-                        ),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter an email';
-                        }
-                        final domain = value.split('@').last.toLowerCase();
-                        if (!_emailRegex.hasMatch(value)) {
-                          return 'Invalid email format';
-                        }
-                        if (_disposableDomains.contains(domain)) {
-                          return 'Disposable emails not allowed';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: passwordController,
-                      obscureText: _obscurePassword,
-                      decoration: InputDecoration(
-                        labelText: 'Password',
-                        labelStyle: TextStyle(color: Colors.grey[700]),
-                        prefixIcon: Icon(Icons.lock_outline, color: navyBlue),
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            _obscurePassword
-                                ? Icons.visibility_off
-                                : Icons.visibility,
-                            color: navyBlue,
-                          ),
-                          onPressed: () {
-                            setState(() => _obscurePassword = !_obscurePassword);
-                          },
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(color: navyBlue, width: 2),
-                        ),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Enter your password';
-                        }
-                        if (value.length < 6) {
-                          return 'Password too short';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          TextButton(
-                            onPressed:
-                                isSendingResetEmail ? null : _resetPassword,
-                            child: isSendingResetEmail
-                                ? SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: navyBlue,
-                                    ),
-                                  )
-                                : Text(
-                                    'Forgot Password?',
-                                    style: TextStyle(color: navyBlue),
-                                  ),
-                          ),
-                          TextButton(
-                            onPressed: isSendingVerificationEmail
-                                ? null
-                                : _resendVerificationEmail,
-                            child: isSendingVerificationEmail
-                                ? SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: navyBlue,
-                                    ),
-                                  )
-                                : Text(
-                                    'Resend Verification Email',
-                                    style: TextStyle(color: navyBlue),
-                                  ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    if (_canCheckBiometrics && _hasBiometrics)
-                      Column(
-                        children: [
-                          SizedBox(
-                            width: double.infinity,
-                            height: 50,
-                            child: OutlinedButton.icon(
-                              icon: const Icon(Icons.fingerprint, size: 28),
-                              label: const Text(
-                                'Login with Face ID / Touch ID',
-                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                              ),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: navyBlue,
-                                side: BorderSide(color: navyBlue, width: 2),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                              ),
-                              onPressed: isLoading ? null : _authenticateWithBiometrics,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                        ],
-                      ),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 50,
-                      child: ElevatedButton(
-                        onPressed:
-                            isLoading ? null : _handleAuthentication,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: navyBlue,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        child: isLoading
-                            ? const SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Text(
-                                'Log in',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          "Don't have an account?",
-                          style: TextStyle(color: Colors.grey[700]),
-                        ),
-                        TextButton(
-                          onPressed: () =>
-                              Navigator.pushNamed(context, '/signup'),
-                          child: Text(
-                            'Sign Up',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: navyBlue,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (errorMessage.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 16),
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.red[50],
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.red[200]!),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(Icons.error_outline,
-                                  color: Colors.red[800]),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  errorMessage,
-                                  style:
-                                      TextStyle(color: Colors.red[800]),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    if (successMessage.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 16),
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.green[50],
-                            borderRadius: BorderRadius.circular(8),
-                            border:
-                                Border.all(color: Colors.green[200]!),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(Icons.check_circle_outline,
-                                  color: Colors.green[800]),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  successMessage,
-                                  style: TextStyle(
-                                      color: Colors.green[800]),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),

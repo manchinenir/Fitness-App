@@ -37,6 +37,12 @@ dependencies:
   # Local storage
   shared_preferences: ^2.2.2
 
+  # Fonts
+  google_fonts: ^4.0.4
+
+  # Health data (Apple Health / Google Health Connect)
+  health: ^11.0.0
+
   # Utility & UI
   provider: ^6.1.2
   fluttertoast: ^8.2.4

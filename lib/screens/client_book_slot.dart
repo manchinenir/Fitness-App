@@ -4,7 +4,7 @@ import 'package:table_calendar/table_calendar.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
-import 'booking_confirmation_page.dart';
+import 'Booking_confirmation_page.dart';
 import 'client_plans_screen.dart'; // Add this import
 class ClientBookSlot extends StatefulWidget {
   final Map<String, dynamic>? rescheduleSlot;

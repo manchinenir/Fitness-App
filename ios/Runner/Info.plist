@@ -75,6 +75,11 @@
 		<string>Flex Facility uses Face ID to securely log you in without entering your password</string>
 		<key>NSApplePayUsageDescription</key>
 		<string>Flex Facility uses Apple Pay to securely process payments.</string>
+		<!-- HealthKit -->
+		<key>NSHealthShareUsageDescription</key>
+		<string>Flex Facility reads your steps, calories, and activity data to display your fitness progress.</string>
+		<key>NSHealthUpdateUsageDescription</key>
+		<string>Flex Facility can save workout data to Apple Health.</string>
 		<key>UIStatusBarHidden</key>
 		<true/>
 		<key>UIViewControllerBasedStatusBarAppearance</key>
